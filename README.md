@@ -97,15 +97,29 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   takes effect between batches. A console window may flash for each batch.
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
-- The report dialog lists each photo's top 5 labels with their scores. It
+- The report dialog lists each photo's match level and its top 5 labels. It
   also shows the preview size and where it came from, and errors.
 
-### Reading the scores
+### Reading the report
 
-Each label is scored on its own, from 0 to 100%, so a photo can match several
-labels. SigLIP's scores are low in absolute terms: a clear match is often 5-30%
-and a weak one under 1%. The order within a photo is what matters, and a score
-for one label can't be compared with a score for another.
+```
+IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
+        halloween 93%, costume 7%, child 1%, baby <1%, holiday <1%
+```
+
+- The percentages are each label's share of the photo's total score across
+  all labels. They show how the labels compare for this photo.
+- Shares always add up to 100%, so some label gets a big share even when
+  nothing fits. The match level shows how sure the model is about the top
+  label, from its raw score:
+  - **strong:** raw score of 10% or more
+  - **good:** 1% to 10%
+  - **weak:** under 1%, so treat the labels as guesses
+
+The raw score is SigLIP's own estimate that a label applies, judged on its
+own. It's low even for clear matches (often 5-30%). It's in the app's output
+and is what a keyword cutoff should use, since it means the same thing in
+every photo.
 
 ### Labels
 
@@ -143,9 +157,9 @@ The output is tab-separated, one line per photo (format documented in
 `hello-app/src/output.rs`):
 
 ```
-#hello-app	1.3.0	backend=DirectML
+#hello-app	1.4.0	backend=DirectML
 #model	load_ms=520	labels=98	label_cache=hit
-OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		forest=0.1589;tree=0.1422;landscape=0.0235;river=0.0147;lake=0.0074
+OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		forest=0.1589;tree=0.1422;landscape=0.0235;river=0.0147;lake=0.0074	forest=0.4512;tree=0.3628;landscape=0.0681;river=0.0418;lake=0.0306	strong
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
 #summary	ok=1	err=1	ms=40
 ```

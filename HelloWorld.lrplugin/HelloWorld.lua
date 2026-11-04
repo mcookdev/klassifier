@@ -88,31 +88,35 @@ local function processChunk(paths)
 	return rows, backend
 end
 
--- "dog=0.1234;beach=0.0567" -> "dog 12.3%, beach 5.7%"
-local function formatLabels(field)
+-- Label shares "dog=0.9213;cat=0.0712" -> "dog 92%, cat 7%"
+local function formatShares(field)
 	local parts = {}
-	for label, score in (field or ''):gmatch('([^;=]+)=([%d.]+)') do
-		parts[#parts + 1] = string.format('%s %.1f%%', label, tonumber(score) * 100)
+	for label, share in (field or ''):gmatch('([^;=]+)=([%d.]+)') do
+		local percent = tonumber(share) * 100
+		parts[#parts + 1] = percent < 0.5 and (label .. ' <1%') or string.format('%s %.0f%%', label, percent)
 	end
 	return #parts > 0 and table.concat(parts, ', ') or '(no labels)'
 end
 
--- Turns one result into a report line and updates the counts.
-local function describe(path, fields, counts)
+-- Adds the report lines for one result and updates the counts.
+local function describe(path, fields, counts, lines)
 	local name = LrPathUtils.leafName(path)
 	if not fields then
 		counts.failed = counts.failed + 1
-		return name .. ': no result from hello-app'
+		lines[#lines + 1] = name .. ': no result from hello-app'
 	elseif fields[1] == 'OK' then
-		-- OK, path, source, width, height, rotation, ms, flags, labels
-		local source, width, height, ms, flags, labels = fields[3], fields[4], fields[5], fields[7], fields[8], fields[9]
+		-- OK, path, source, width, height, rotation, ms, flags, labels, shares, match
+		local source, width, height, ms, flags = fields[3], fields[4], fields[5], fields[7], fields[8]
+		local shares, match = fields[10], fields[11] or 'unknown'
 		counts.loaded = counts.loaded + 1
-		local line = string.format('%s:  %s    [%sx%s %s, %s ms]', name, formatLabels(labels), width, height, source, ms)
+		counts[match] = (counts[match] or 0) + 1
+		local heading = string.format('%s  -  %s match    (%sx%s %s, %s ms)', name, match, width, height, source, ms)
 		if flags and flags:find('small', 1, true) then
 			counts.small = counts.small + 1
-			line = line .. ' [SMALL PREVIEW]'
+			heading = heading .. '  SMALL PREVIEW'
 		end
-		return line
+		lines[#lines + 1] = heading
+		lines[#lines + 1] = '        ' .. formatShares(shares)
 	else
 		local message = fields[3] or 'unknown error'
 		if message:sub(1, 12) == 'unsupported:' then
@@ -120,7 +124,7 @@ local function describe(path, fields, counts)
 		else
 			counts.failed = counts.failed + 1
 		end
-		return name .. ': ' .. message
+		lines[#lines + 1] = name .. ': ' .. message
 	end
 end
 
@@ -130,7 +134,7 @@ local function showReport(summary, lines)
 		title = 'Classification report',
 		contents = f:column {
 			spacing = f:control_spacing(),
-			f:static_text { title = summary },
+			f:static_text { title = summary, height_in_lines = select(2, summary:gsub('\n', '')) + 1 },
 			f:scrolled_view {
 				width = 720,
 				height = 420,
@@ -207,16 +211,19 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 	end
 	progress:done()
 
-	local counts = { loaded = 0, small = 0, failed = 0, unsupported = 0 }
+	local counts = { loaded = 0, small = 0, failed = 0, unsupported = 0, strong = 0, good = 0, weak = 0 }
 	local lines = {}
 	for _, r in ipairs(results) do
-		lines[#lines + 1] = describe(r.path, r.fields, counts)
+		describe(r.path, r.fields, counts, lines)
 	end
 
 	local summary = string.format(
-		'%d classified (%d with small previews), %d failed, %d unsupported. Skipped %d video(s), %d duplicate(s).\n' ..
-		'Ran on %s. Each label is scored on its own; compare scores within a photo.',
-		counts.loaded, counts.small, counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown')
+		'%d classified: %d strong, %d good, %d weak matches (%d with small previews).\n' ..
+		'%d failed, %d unsupported. Skipped %d video(s), %d duplicate(s). Ran on %s.\n\n' ..
+		'Percentages are each label\'s share of the photo\'s total score. The match level\n' ..
+		'says how sure the model is about the top label.',
+		counts.loaded, counts.strong, counts.good, counts.weak, counts.small,
+		counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown')
 	if cancelled then
 		summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 	end

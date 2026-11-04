@@ -31,6 +31,9 @@ const TEXT_BATCH: usize = 32;
 /// resize (see `preprocess`). Only reductions of 2x or more, where area averaging is accurate.
 const PRESHRINK_ABOVE: u32 = 8 * IMAGE_SIZE;
 const PRESHRINK_EDGE: u32 = 4 * IMAGE_SIZE;
+/// Match levels by the best raw score in a photo (see `MatchLevel`).
+const STRONG_MATCH: f32 = 0.10;
+const GOOD_MATCH: f32 = 0.01;
 /// Bump when anything that affects cached label embeddings changes (prompt, tokenizing, ...).
 const CACHE_VERSION: u32 = 1;
 
@@ -87,6 +90,47 @@ pub fn init_runtime(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// One label's result for a photo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelScore {
+    pub label: String,
+    /// SigLIP's own score: the chance this label applies, judged on its own. Low in absolute
+    /// terms (a clear match is often 0.05-0.3), but comparable across photos, so it's what a
+    /// keyword cutoff should use.
+    pub score: f32,
+    /// This label's share of all labels for the photo (softmax of the logits; all labels sum to
+    /// 1). Easier to read, but some label always gets a large share, even if nothing matches.
+    pub share: f32,
+}
+
+/// How much to trust a photo's labels, from its best raw score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchLevel {
+    Strong,
+    Good,
+    Weak,
+}
+
+impl MatchLevel {
+    pub fn from_best_score(score: f32) -> Self {
+        if score >= STRONG_MATCH {
+            MatchLevel::Strong
+        } else if score >= GOOD_MATCH {
+            MatchLevel::Good
+        } else {
+            MatchLevel::Weak
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MatchLevel::Strong => "strong",
+            MatchLevel::Good => "good",
+            MatchLevel::Weak => "weak",
+        }
+    }
+}
+
 pub struct Classifier {
     vision: Session,
     backend: Backend,
@@ -130,7 +174,7 @@ impl Classifier {
     }
 
     /// Scores every label for `image` and returns the `top` best, highest first.
-    pub fn classify(&mut self, image: &DynamicImage, top: usize) -> Result<Vec<(String, f32)>> {
+    pub fn classify(&mut self, image: &DynamicImage, top: usize) -> Result<Vec<LabelScore>> {
         let pixels = preprocess(image);
         let outputs = self
             .vision
@@ -142,15 +186,26 @@ impl Classifier {
             .into_dimensionality::<Ix2>()?;
         let embedding = normalized(embedding.row(0));
 
-        let similarities = self.label_embeddings.dot(&embedding);
-        let mut scores: Vec<(usize, f32)> = similarities
-            .iter()
-            .enumerate()
-            .map(|(i, &cos)| (i, sigmoid(LOGIT_SCALE * cos + LOGIT_BIAS)))
-            .collect();
-        scores.sort_by(|a, b| b.1.total_cmp(&a.1));
-        Ok(scores.into_iter().take(top).map(|(i, score)| (self.labels[i].clone(), score)).collect())
+        let logits: Vec<f32> =
+            self.label_embeddings.dot(&embedding).iter().map(|&cos| LOGIT_SCALE * cos + LOGIT_BIAS).collect();
+        Ok(rank(&self.labels, &logits, top))
     }
+}
+
+/// Turns per-label logits into the `top` best `LabelScore`s, highest first.
+fn rank(labels: &[String], logits: &[f32], top: usize) -> Vec<LabelScore> {
+    // Softmax, shifted by the max logit so exp() can't overflow.
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let exps: Vec<f32> = logits.iter().map(|&l| (l - max).exp()).collect();
+    let total: f32 = exps.iter().sum();
+
+    let mut order: Vec<usize> = (0..logits.len()).collect();
+    order.sort_by(|&a, &b| logits[b].total_cmp(&logits[a]));
+    order
+        .into_iter()
+        .take(top)
+        .map(|i| LabelScore { label: labels[i].clone(), score: sigmoid(logits[i]), share: exps[i] / total })
+        .collect()
 }
 
 /// Reads a labels file: one label per line; blank lines and `#` comments are skipped, and
@@ -347,6 +402,23 @@ fn write_cache(path: &Path, embeddings: &Array2<f32>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rank_orders_by_score_and_shares_sum_to_one() {
+        let labels: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        let all = rank(&labels, &[-5.0, -2.0, -8.0], 3);
+        assert_eq!(all.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["b", "a", "c"]);
+        assert!((all.iter().map(|s| s.share).sum::<f32>() - 1.0).abs() < 1e-6);
+        assert!((all[0].score - sigmoid(-2.0)).abs() < 1e-6);
+        assert_eq!(rank(&labels, &[-5.0, -2.0, -8.0], 1).len(), 1);
+    }
+
+    #[test]
+    fn match_levels_follow_best_score() {
+        assert_eq!(MatchLevel::from_best_score(0.12), MatchLevel::Strong);
+        assert_eq!(MatchLevel::from_best_score(0.03), MatchLevel::Good);
+        assert_eq!(MatchLevel::from_best_score(0.004), MatchLevel::Weak);
+    }
 
     #[test]
     fn prompt_is_lowercased_without_punctuation() {
