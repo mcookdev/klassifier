@@ -1,6 +1,7 @@
 --[[----------------------------------------------------------------------------
   HelloWorld.lua
-  Runs hello-app.exe and shows its output plus the number of selected photos.
+  Runs hello-app.exe on the active photo and shows its output plus the number
+  of selected photos.
 ------------------------------------------------------------------------------]]
 
 local LrApplication = import 'LrApplication'
@@ -14,11 +15,13 @@ local logger = LrLogger('HelloWorld')
 logger:enable('logfile') -- writes to HelloWorld.log in the Lightroom logs folder
 
 -- Returns the app's trimmed stdout, or nil plus an error message.
-local function runHelloApp()
+local function runHelloApp(photoPath)
 	local exe = LrPathUtils.child(_PLUGIN.path, 'hello-app.exe')
 	local outFile = LrPathUtils.child(LrPathUtils.getStandardFilePath('temp'), 'hello-app-output.txt')
 
-	local cmd = string.format('"%s" > "%s"', exe, outFile)
+	local cmd = string.format('"%s"', exe)
+	if photoPath then cmd = cmd .. string.format(' "%s"', photoPath) end
+	cmd = cmd .. string.format(' > "%s"', outFile)
 	-- cmd /c needs the whole command wrapped in quotes when it contains quoted paths.
 	if WIN_ENV then cmd = '"' .. cmd .. '"' end
 
@@ -40,8 +43,11 @@ end
 LrTasks.startAsyncTask(function()
 	local catalog = LrApplication.activeCatalog()
 	local count = #catalog:getTargetPhotos()
+	-- The active photo when several are selected; nil if none.
+	local photo = catalog:getTargetPhoto()
+	local photoPath = photo and photo:getRawMetadata('path')
 
-	local greeting, err = runHelloApp()
+	local greeting, err = runHelloApp(photoPath)
 	if not greeting then
 		logger:error(err)
 		LrDialogs.message("Hello, World!", "Failed to run hello-app.exe:\n" .. err, "critical")

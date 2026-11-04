@@ -47,7 +47,8 @@ make deploy DEPLOY_DIR=/mnt/c/somewhere
 - Select one or more photos (optional).
 - Go to **File > Plug-in Extras > Say Hello** (or **Library > Plug-in
   Extras > Say Hello**).
-- A dialog shows the message returned by `hello-app.exe` and how many photos
+- The plugin passes the active photo's path to `hello-app.exe`, which reports
+  back the file name. A dialog shows the app's message and how many photos
   are targeted. A console window may flash briefly while the app runs.
 
 ## Updating the plugin
