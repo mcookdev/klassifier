@@ -1,7 +1,7 @@
 --[[----------------------------------------------------------------------------
   HelloWorld.lua
-  Runs hello-app.exe on the targeted photos, in chunks, and shows a report of
-  the preview image it could read for each one.
+  Runs hello-app.exe on the targeted photos, in chunks, and shows the labels
+  it matched for each one.
 ------------------------------------------------------------------------------]]
 
 local LrApplication     = import 'LrApplication'
@@ -26,12 +26,13 @@ local function tempFile(name)
 	return LrFileUtils.chooseUniqueFileName(LrPathUtils.child(LrPathUtils.getStandardFilePath('temp'), name))
 end
 
--- Runs hello-app.exe with `args` (already quoted). Returns its stdout, or nil plus an error message.
+-- Runs hello-app.exe with `args` (already quoted). Returns its output (stdout and stderr),
+-- or nil plus an error message.
 local function runHelloApp(args)
 	local exe = LrPathUtils.child(_PLUGIN.path, 'hello-app.exe')
 	local outFile = tempFile('hello-app-output.txt')
 
-	local cmd = string.format('"%s" %s > "%s"', exe, args, outFile)
+	local cmd = string.format('"%s" %s > "%s" 2>&1', exe, args, outFile)
 	-- cmd /c needs the whole command wrapped in quotes when it contains quoted paths.
 	if WIN_ENV then cmd = '"' .. cmd .. '"' end
 
@@ -40,7 +41,9 @@ local function runHelloApp(args)
 	local output = LrFileUtils.readFile(outFile)
 	LrFileUtils.delete(outFile)
 	if exitCode ~= 0 then
-		return nil, 'hello-app.exe exited with code ' .. tostring(exitCode)
+		-- The app prints "error: ..." explaining why; show the end of its output.
+		local detail = output and output:gsub('%s+$', ''):sub(-1000) or ''
+		return nil, 'hello-app.exe exited with code ' .. tostring(exitCode) .. '\n' .. detail
 	end
 	if not output then
 		return nil, 'Could not read output file ' .. outFile
@@ -56,7 +59,8 @@ local function splitTabs(line)
 	return fields
 end
 
--- Runs the app on one chunk of paths. Returns a table of path -> row fields, or nil plus an error.
+-- Runs the app on one chunk of paths. Returns a table of path -> row fields plus the backend
+-- name (DirectML or CPU), or nil plus an error.
 local function processChunk(paths)
 	local listFile = tempFile('hello-app-list.txt')
 	local f = assert(io.open(listFile, 'wb'))
@@ -68,15 +72,29 @@ local function processChunk(paths)
 	if not output then return nil, err end
 	logger:info(output)
 
-	local rows = {}
+	local rows, backend = {}, nil
 	for line in output:gmatch('[^\r\n]+') do
-		if line:sub(1, 1) ~= '#' then
-			local fields = splitTabs(line)
-			-- Fields: status, path, ... (extra fields from later versions are ignored)
+		local fields = splitTabs(line)
+		-- Fields: status, path, ... (extra fields from later versions are ignored).
+		-- Other lines are comments (#...) or warnings from the app.
+		if fields[1] == 'OK' or fields[1] == 'ERR' then
 			rows[fields[2]] = fields
+		elseif fields[1] == '#hello-app' then
+			for _, field in ipairs(fields) do
+				backend = field:match('^backend=(.+)$') or backend
+			end
 		end
 	end
-	return rows
+	return rows, backend
+end
+
+-- "dog=0.1234;beach=0.0567" -> "dog 12.3%, beach 5.7%"
+local function formatLabels(field)
+	local parts = {}
+	for label, score in (field or ''):gmatch('([^;=]+)=([%d.]+)') do
+		parts[#parts + 1] = string.format('%s %.1f%%', label, tonumber(score) * 100)
+	end
+	return #parts > 0 and table.concat(parts, ', ') or '(no labels)'
 end
 
 -- Turns one result into a report line and updates the counts.
@@ -86,15 +104,13 @@ local function describe(path, fields, counts)
 		counts.failed = counts.failed + 1
 		return name .. ': no result from hello-app'
 	elseif fields[1] == 'OK' then
-		-- OK, path, source, width, height, rotation, ms, flags
-		local source, width, height, rotation, ms, flags = fields[3], fields[4], fields[5], fields[6], fields[7], fields[8]
+		-- OK, path, source, width, height, rotation, ms, flags, labels
+		local source, width, height, ms, flags, labels = fields[3], fields[4], fields[5], fields[7], fields[8], fields[9]
 		counts.loaded = counts.loaded + 1
-		local line = string.format('%s: %s x %s from %s', name, width, height, source)
-		if rotation ~= '0' then line = line .. ', rotated ' .. rotation end
-		line = line .. string.format(', %s ms', ms)
+		local line = string.format('%s:  %s    [%sx%s %s, %s ms]', name, formatLabels(labels), width, height, source, ms)
 		if flags and flags:find('small', 1, true) then
 			counts.small = counts.small + 1
-			line = line .. '  [SMALL]'
+			line = line .. ' [SMALL PREVIEW]'
 		end
 		return line
 	else
@@ -111,7 +127,7 @@ end
 local function showReport(summary, lines)
 	local f = LrView.osFactory()
 	LrDialogs.presentModalDialog {
-		title = 'Preview report',
+		title = 'Classification report',
 		contents = f:column {
 			spacing = f:control_spacing(),
 			f:static_text { title = summary },
@@ -153,18 +169,18 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 	end
 
 	if #paths == 0 then
-		LrDialogs.message('Preview report', 'No photos to process.', 'info')
+		LrDialogs.message('Classification report', 'No photos to process.', 'info')
 		return
 	end
 	if #paths > CONFIRM_ABOVE then
 		local answer = LrDialogs.confirm(
-			string.format('Read previews for %d photos?', #paths),
+			string.format('Classify %d photos?', #paths),
 			'This can take a while. You can cancel from the progress bar.')
 		if answer ~= 'ok' then return end
 	end
 
-	local progress = LrProgressScope { title = 'Reading previews', functionContext = context }
-	local results, cancelled = {}, false
+	local progress = LrProgressScope { title = 'Classifying photos', functionContext = context }
+	local results, cancelled, backend = {}, false, nil
 	for first = 1, #paths, CHUNK_SIZE do
 		if progress:isCanceled() then
 			cancelled = true
@@ -175,13 +191,15 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 
 		local chunk = {}
 		for i = first, last do chunk[#chunk + 1] = paths[i] end
-		local rows, err = processChunk(chunk)
+		local rows, chunkBackend = processChunk(chunk)
 		if not rows then
+			local err = chunkBackend
 			progress:done()
 			logger:error(err)
-			LrDialogs.message('Preview report', 'Failed to run hello-app.exe:\n' .. err, 'critical')
+			LrDialogs.message('Classification report', 'Failed to run hello-app.exe:\n' .. err, 'critical')
 			return
 		end
+		backend = chunkBackend or backend
 		for _, path in ipairs(chunk) do
 			results[#results + 1] = { path = path, fields = rows[path] }
 		end
@@ -196,8 +214,9 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 	end
 
 	local summary = string.format(
-		'%d loaded (%d small), %d failed, %d unsupported. Skipped %d video(s), %d duplicate(s).',
-		counts.loaded, counts.small, counts.failed, counts.unsupported, videos, duplicates)
+		'%d classified (%d with small previews), %d failed, %d unsupported. Skipped %d video(s), %d duplicate(s).\n' ..
+		'Ran on %s. Each label is scored on its own; compare scores within a photo.',
+		counts.loaded, counts.small, counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown')
 	if cancelled then
 		summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 	end

@@ -131,7 +131,7 @@ fn cli_reports_each_listed_path() {
     let list = tmp.join("list.txt");
     fs::write(&list, format!("\u{feff}{}\r\n{}\r\n\r\n", small.display(), missing.display())).unwrap();
 
-    let out = Command::new(env!("CARGO_BIN_EXE_hello-app")).arg("--list").arg(&list).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_hello-app")).arg("--no-classify").arg("--list").arg(&list).output().unwrap();
     assert!(out.status.success(), "exit {:?}: {}", out.status, String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();

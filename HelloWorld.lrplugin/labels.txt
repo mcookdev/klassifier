@@ -1,0 +1,117 @@
+# Labels the classifier scores each photo against, one per line.
+# Blank lines and lines starting with # are ignored. Each label is
+# scored on its own, so several can match the same photo.
+
+# People
+portrait
+selfie
+group photo
+child
+baby
+family
+couple
+crowd
+
+# Events
+wedding
+birthday party
+graduation
+concert
+sports
+dance
+holiday
+christmas
+halloween
+costume
+parade
+
+# Animals
+dog
+cat
+bird
+horse
+fish
+insect
+wildlife
+farm animals
+
+# Nature and landscape
+landscape
+mountain
+beach
+ocean
+lake
+river
+waterfall
+forest
+tree
+flower
+garden
+desert
+field
+snow
+sunset
+sunrise
+sky
+clouds
+rain
+fog
+
+# Places
+city
+street
+building
+architecture
+bridge
+church
+castle
+monument
+museum
+park
+playground
+house
+interior
+kitchen
+restaurant
+school
+stadium
+road
+airport
+train station
+
+# Things
+car
+boat
+airplane
+train
+bicycle
+motorcycle
+food
+drink
+cake
+toy
+book
+computer
+phone
+document
+screenshot
+painting
+sculpture
+sign
+
+# Activities
+hiking
+swimming
+camping
+cooking
+travel
+shopping
+playing
+
+# Look
+night
+black and white
+close-up
+aerial view
+reflection
+silhouette
