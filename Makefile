@@ -1,6 +1,8 @@
 PLUGIN      := HelloWorld.lrplugin
 EXE         := hello-app/target/x86_64-pc-windows-gnu/release/hello-app.exe
 DEPLOY_DIR  ?= /mnt/c/Users/cadre/lr-plugins
+# Lightroom runs Lua 5.1; a newer luac accepts syntax Lightroom rejects (goto, //, bitwise ops).
+LUAC        ?= luac5.1
 
 # Runtime files that aren't committed: ONNX Runtime + DirectML DLLs and the SigLIP model.
 # `make fetch` downloads them into $(VENDOR); `make deploy` copies them next to the exe.
@@ -24,14 +26,22 @@ download = mkdir -p $(@D) && curl -fL --retry 3 -o $@.part $(1) && mv $@.part $@
 # $(call extract,<zip>,<member>): copy one file out of a .nupkg (a zip) to $@.
 extract = mkdir -p $(@D) && python3 -I -c 'import sys, zipfile; open(sys.argv[3], "wb").write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' $(1) $(2) $@
 
-.PHONY: all build test fetch deploy clean
+.PHONY: all build lint test fetch deploy clean
 
 all: deploy
 
 build:
 	cd hello-app && cargo build --release
 
-test:
+# Syntax check only (-p writes no luac.out). Skipped with a note if luac5.1 isn't installed.
+lint:
+	@if command -v $(LUAC) >/dev/null; then \
+		$(LUAC) -p $(PLUGIN)/*.lua && echo "Lua syntax OK"; \
+	else \
+		echo "Skipping Lua syntax check: $(LUAC) not found (sudo apt install lua5.1)"; \
+	fi
+
+test: lint
 	cd hello-app && cargo test --target x86_64-unknown-linux-gnu
 
 fetch: $(ASSETS)
@@ -58,7 +68,7 @@ $(MODEL_DIR)/tokenizer.json:
 	$(call download,$(SIGLIP_URL)/$(@F))
 
 # rsync only copies changed files, so the large model files are copied once.
-deploy: build fetch
+deploy: lint build fetch
 	mkdir -p "$(DEPLOY_DIR)/$(PLUGIN)"
 	rsync -rt --delete --exclude=.cache "$(PLUGIN)/" "$(VENDOR)/" "$(EXE)" "$(DEPLOY_DIR)/$(PLUGIN)/"
 	@echo "Deployed to $(DEPLOY_DIR)/$(PLUGIN)"

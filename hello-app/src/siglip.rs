@@ -34,6 +34,10 @@ const PRESHRINK_EDGE: u32 = 4 * IMAGE_SIZE;
 /// Match levels by the best raw score in a photo (see `MatchLevel`).
 const STRONG_MATCH: f32 = 0.10;
 const GOOD_MATCH: f32 = 0.01;
+/// Default raw-score cutoff for suggesting a label as a keyword (see `suggested`).
+pub const SUGGEST_MIN: f32 = GOOD_MATCH;
+/// Most keywords suggested per photo.
+pub const SUGGEST_MAX: usize = 5;
 /// Bump when anything that affects cached label embeddings changes (prompt, tokenizing, ...).
 const CACHE_VERSION: u32 = 1;
 
@@ -206,6 +210,13 @@ fn rank(labels: &[String], logits: &[f32], top: usize) -> Vec<LabelScore> {
         .take(top)
         .map(|i| LabelScore { label: labels[i].clone(), score: sigmoid(logits[i]), share: exps[i] / total })
         .collect()
+}
+
+/// The labels to suggest as keywords: the leading labels of `ranked` (best first, as from
+/// `Classifier::classify`) whose raw score is at least `min`, at most `max` of them.
+pub fn suggested(ranked: &[LabelScore], min: f32, max: usize) -> &[LabelScore] {
+    let passing = ranked.iter().take_while(|l| l.score >= min).count();
+    &ranked[..passing.min(max)]
 }
 
 /// Reads and merges labels files: one label per line; blank lines and `#` comments are
@@ -429,6 +440,26 @@ mod tests {
         assert_eq!(MatchLevel::from_best_score(0.12), MatchLevel::Strong);
         assert_eq!(MatchLevel::from_best_score(0.03), MatchLevel::Good);
         assert_eq!(MatchLevel::from_best_score(0.004), MatchLevel::Weak);
+    }
+
+    fn scores(values: &[f32]) -> Vec<LabelScore> {
+        values.iter().enumerate().map(|(i, &score)| LabelScore { label: format!("l{i}"), score, share: 0.0 }).collect()
+    }
+
+    #[test]
+    fn suggested_keeps_leading_labels_at_or_above_min() {
+        let ranked = scores(&[0.2, 0.01, 0.009, 0.5]);
+        // Stops at the first label below the cutoff; the score exactly at it counts.
+        assert_eq!(suggested(&ranked, 0.01, 5), &ranked[..2]);
+        assert_eq!(suggested(&ranked, 0.3, 5), &[] as &[LabelScore]);
+        assert_eq!(suggested(&[], 0.01, 5), &[] as &[LabelScore]);
+    }
+
+    #[test]
+    fn suggested_is_capped_at_max() {
+        let ranked = scores(&[0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3]);
+        assert_eq!(suggested(&ranked, SUGGEST_MIN, SUGGEST_MAX).len(), SUGGEST_MAX);
+        assert_eq!(suggested(&ranked, SUGGEST_MIN, 2), &ranked[..2]);
     }
 
     #[test]

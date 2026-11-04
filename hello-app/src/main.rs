@@ -18,6 +18,7 @@ Usage: hello-app [options] [paths...]
 
   --list <file>    Read photo paths from <file>, one per line (UTF-8)
   --top <n>        Report the <n> best-scoring labels per photo (default 5)
+  --min-score <x>  Suggest labels with a raw score of at least <x>, 0 to 1 (default 0.01)
   --labels <file>  Labels to score against; repeat to merge several files
                    (default: label-sets/General.txt next to the exe)
   --cpu            Don't use the GPU
@@ -33,6 +34,7 @@ struct Args {
     dump: Option<PathBuf>,
     top: usize,
     labels: Vec<PathBuf>,
+    min_score: f32,
     classify: bool,
     use_gpu: bool,
 }
@@ -60,8 +62,15 @@ fn main() -> ExitCode {
 
 /// Returns `None` when help was requested.
 fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
-    let mut args =
-        Args { paths: Vec::new(), dump: None, top: DEFAULT_TOP, labels: Vec::new(), classify: true, use_gpu: true };
+    let mut args = Args {
+        paths: Vec::new(),
+        dump: None,
+        top: DEFAULT_TOP,
+        labels: Vec::new(),
+        min_score: siglip::SUGGEST_MIN,
+        classify: true,
+        use_gpu: true,
+    };
     let mut it = raw.into_iter();
     while let Some(arg) = it.next() {
         match arg.to_str() {
@@ -87,6 +96,14 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
                     .and_then(|s| s.parse().ok())
                     .filter(|&n| n > 0)
                     .context("--top needs a number above 0")?;
+            }
+            Some("--min-score") => {
+                let x = it.next().context("--min-score needs a number from 0 to 1")?;
+                args.min_score = x
+                    .to_str()
+                    .and_then(|s| s.parse().ok())
+                    .filter(|x: &f32| (0.0..=1.0).contains(x))
+                    .context("--min-score needs a number from 0 to 1")?;
             }
             Some("--cpu") => args.use_gpu = false,
             Some("--no-classify") => args.classify = false,
@@ -148,7 +165,7 @@ fn run(args: &Args) -> Result<()> {
         match result {
             Ok((loaded, labels)) => {
                 let ms = t.elapsed().as_millis();
-                writeln!(out, "{}", output::ok_row(&shown, &loaded, ms, labels.as_deref()))?;
+                writeln!(out, "{}", output::ok_row(&shown, &loaded, ms, labels.as_deref(), args.min_score))?;
                 ok += 1;
                 if let Some(dir) = &args.dump {
                     if let Err(e) = dump(dir, path, &loaded.image) {

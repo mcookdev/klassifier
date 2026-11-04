@@ -3,12 +3,12 @@
 //! ```text
 //! #hello-app<TAB><version>[<TAB>backend=<DirectML|CPU>]
 //! #model<TAB>load_ms=<n><TAB>labels=<n><TAB>label_cache=<hit|miss>
-//! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match>]
+//! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match><TAB><suggested>]
 //! ERR<TAB><path><TAB><message>
 //! #summary<TAB>ok=<n><TAB>err=<n><TAB>ms=<n>
 //! ```
 //!
-//! The last three OK fields, the backend and `#model` are only present when classifying (not
+//! The last four OK fields, the backend and `#model` are only present when classifying (not
 //! with `--no-classify`):
 //! - `<labels>`: `label=score;label=score;...`, best first, 0.0000-1.0000. SigLIP's own score
 //!   for each label on its own; usually low (a clear match is often 0.05-0.3). Use this for
@@ -16,6 +16,8 @@
 //! - `<shares>`: the same labels in the same order, `label=share;...`: each label's share of
 //!   all labels for this photo (they sum to 1 over all labels). Easier to read, but relative.
 //! - `<match>`: `strong`, `good` or `weak`, from the best label's score.
+//! - `<suggested>`: `label;label;...`, the labels from `<labels>` suggested as keywords (raw
+//!   score at or above `--min-score`, at most `SUGGEST_MAX`), best first. Empty if none.
 //!
 //! Lines starting with `#` are informational. Readers must ignore fields beyond the ones
 //! they know, so later versions can append fields.
@@ -23,7 +25,7 @@
 use image::metadata::Orientation;
 
 use crate::preview::{long_edge, Loaded};
-use crate::siglip::{LabelScore, MatchLevel};
+use crate::siglip::{self, LabelScore, MatchLevel};
 
 /// Images whose long edge is below this are flagged `small`; it is the classifier's input size.
 pub const SMALL_EDGE: u32 = 224;
@@ -41,7 +43,8 @@ pub fn model_line(load_ms: u128, labels: usize, from_cache: bool) -> String {
     format!("#model\tload_ms={load_ms}\tlabels={labels}\tlabel_cache={cache}")
 }
 
-pub fn ok_row(path: &str, loaded: &Loaded, ms: u128, labels: Option<&[LabelScore]>) -> String {
+/// `min_score` is the raw-score cutoff for `<suggested>`.
+pub fn ok_row(path: &str, loaded: &Loaded, ms: u128, labels: Option<&[LabelScore]>, min_score: f32) -> String {
     let image = &loaded.image;
     let flags = if long_edge(image) < SMALL_EDGE { "small" } else { "" };
     let mut row = format!(
@@ -56,11 +59,14 @@ pub fn ok_row(path: &str, loaded: &Loaded, ms: u128, labels: Option<&[LabelScore
     );
     if let Some(labels) = labels {
         let best = labels.first().map_or(0.0, |l| l.score);
+        let suggested: Vec<String> =
+            siglip::suggested(labels, min_score, siglip::SUGGEST_MAX).iter().map(|l| label_name(&l.label)).collect();
         row.push_str(&format!(
-            "\t{}\t{}\t{}",
+            "\t{}\t{}\t{}\t{}",
             labels_field(labels, |l| l.score),
             labels_field(labels, |l| l.share),
-            MatchLevel::from_best_score(best).as_str()
+            MatchLevel::from_best_score(best).as_str(),
+            suggested.join(";")
         ));
     }
     row
@@ -70,9 +76,14 @@ pub fn ok_row(path: &str, loaded: &Loaded, ms: u128, labels: Option<&[LabelScore
 fn labels_field(labels: &[LabelScore], value: impl Fn(&LabelScore) -> f32) -> String {
     labels
         .iter()
-        .map(|l| format!("{}={:.4}", clean(&l.label).replace(['=', ';'], " "), value(l)))
+        .map(|l| format!("{}={:.4}", label_name(&l.label), value(l)))
         .collect::<Vec<_>>()
         .join(";")
+}
+
+/// A label as it appears in the label fields, without the field and list separators.
+fn label_name(label: &str) -> String {
+    clean(label).replace(['=', ';'], " ")
 }
 
 pub fn err_row(path: &str, error: &anyhow::Error) -> String {
@@ -127,6 +138,41 @@ mod tests {
         ];
         assert_eq!(labels_field(&labels, |l| l.score), "dog=0.9120;a b c=0.5000");
         assert_eq!(labels_field(&labels, |l| l.share), "dog=0.7000;a b c=0.2000");
+    }
+
+    fn loaded() -> Loaded {
+        Loaded {
+            image: image::DynamicImage::new_rgb8(400, 300),
+            source: crate::preview::Source::File,
+            orientation: Orientation::NoTransforms,
+        }
+    }
+
+    #[test]
+    fn ok_row_lists_suggested_labels() {
+        let labels = [
+            LabelScore { label: "dog".into(), score: 0.2, share: 0.6 },
+            LabelScore { label: "a;b".into(), score: 0.05, share: 0.3 },
+            LabelScore { label: "cat".into(), score: 0.004, share: 0.1 },
+        ];
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01);
+        let fields: Vec<&str> = row.split('\t').collect();
+        assert_eq!(fields.len(), 12);
+        assert_eq!(fields[10], "strong");
+        assert_eq!(fields[11], "dog;a b");
+    }
+
+    #[test]
+    fn ok_row_suggests_nothing_below_cutoff() {
+        let labels = [LabelScore { label: "dog".into(), score: 0.004, share: 1.0 }];
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01);
+        assert!(row.ends_with("\tweak\t"), "{row}");
+        assert_eq!(row.split('\t').count(), 12);
+    }
+
+    #[test]
+    fn ok_row_without_labels_has_eight_fields() {
+        assert_eq!(ok_row("x.jpg", &loaded(), 7, None, 0.01).split('\t').count(), 8);
     }
 
     #[test]

@@ -103,6 +103,13 @@ local function formatShares(field)
 	return #parts > 0 and table.concat(parts, ', ') or '(no labels)'
 end
 
+-- Suggested keywords "dog;beach" -> "dog, beach"
+local function formatSuggested(field)
+	local labels = {}
+	for label in (field or ''):gmatch('[^;]+') do labels[#labels + 1] = label end
+	return #labels > 0 and table.concat(labels, ', ') or 'none'
+end
+
 -- Adds the report lines for one result and updates the counts.
 local function describe(path, fields, counts, lines)
 	local name = LrPathUtils.leafName(path)
@@ -110,9 +117,9 @@ local function describe(path, fields, counts, lines)
 		counts.failed = counts.failed + 1
 		lines[#lines + 1] = name .. ': no result from hello-app'
 	elseif fields[1] == 'OK' then
-		-- OK, path, source, width, height, rotation, ms, flags, labels, shares, match
+		-- OK, path, source, width, height, rotation, ms, flags, labels, shares, match, suggested
 		local source, width, height, ms, flags = fields[3], fields[4], fields[5], fields[7], fields[8]
-		local shares, match = fields[10], fields[11] or 'unknown'
+		local shares, match, suggested = fields[10], fields[11] or 'unknown', fields[12]
 		counts.loaded = counts.loaded + 1
 		counts[match] = (counts[match] or 0) + 1
 		local heading = string.format('%s  -  %s match    (%sx%s %s, %s ms)', name, match, width, height, source, ms)
@@ -122,6 +129,7 @@ local function describe(path, fields, counts, lines)
 		end
 		lines[#lines + 1] = heading
 		lines[#lines + 1] = '        ' .. formatShares(shares)
+		lines[#lines + 1] = '        Suggested: ' .. formatSuggested(suggested)
 	else
 		local message = fields[3] or 'unknown error'
 		if message:sub(1, 12) == 'unsupported:' then

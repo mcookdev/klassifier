@@ -61,7 +61,13 @@ make deploy DEPLOY_DIR=/mnt/c/somewhere
 make test
 ```
 
-This runs the app's tests natively on Linux. They cover reading previews, not
+This first checks the plugin's Lua syntax with `luac5.1` (`make lint`, also run by
+`make deploy`). Lightroom runs Lua 5.1, so use that version: newer ones accept
+syntax Lightroom rejects. Install it with `sudo apt install lua5.1`. Without it,
+the check is skipped with a note. It catches syntax errors only, not misspelled
+names or wrong SDK calls.
+
+It then runs the app's tests natively on Linux. They cover reading previews, not
 the classifier, because ONNX Runtime is only deployed for Windows. The tests that use real photos
 read `test-data/manifest.tsv` at the repo root and are skipped if it's
 missing. `test-data/` is gitignored because it holds personal photos. Each
@@ -99,14 +105,16 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   takes effect between batches. A console window may flash for each batch.
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
-- The report dialog lists each photo's match level and its top 5 labels. It
-  also shows the preview size and where it came from, and errors.
+- The report dialog lists each photo's match level, its top 5 labels and the
+  keywords it suggests. It also shows the preview size and where it came
+  from, and errors.
 
 ### Reading the report
 
 ```
 IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
         halloween 93%, costume 7%, child 1%, baby <1%, holiday <1%
+        Suggested: halloween, costume
 ```
 
 - The percentages are each label's share of the photo's total score across
@@ -120,8 +128,12 @@ IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
 
 The raw score is SigLIP's own estimate that a label applies, judged on its
 own. It's low even for clear matches (often 5-30%). It's in the app's output
-and is what a keyword cutoff should use, since it means the same thing in
-every photo.
+and is what the keyword cutoff uses, since it means the same thing in every
+photo.
+
+- **Suggested** keywords are the top labels with a raw score of at least 1%,
+  at most 5 per photo. A weak match suggests none. Suggestions are only
+  shown for now; nothing is written to the catalog.
 
 ### Labels, label sets and hints
 
@@ -191,6 +203,9 @@ hello-app.exe [options] [paths...]
 
 - `--list <file>` reads photo paths from a UTF-8 file, one per line.
 - `--top <n>` reports the `n` best labels per photo (default 5).
+- `--min-score <x>` suggests labels with a raw score of at least `x`, from 0
+  to 1 (default 0.01). At most 5 are suggested, and only from the `--top`
+  labels.
 - `--labels <file>` scores against the labels in `<file>`. Repeat it to
   merge several files; labels in more than one are kept once. The default is
   `label-sets/General.txt` next to the exe.
@@ -203,9 +218,9 @@ The output is tab-separated, one line per photo (format documented in
 `hello-app/src/output.rs`):
 
 ```
-#hello-app	1.4.0	backend=DirectML
+#hello-app	1.8.0	backend=DirectML
 #model	load_ms=520	labels=98	label_cache=hit
-OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		forest=0.1589;tree=0.1422;landscape=0.0235;river=0.0147;lake=0.0074	forest=0.4512;tree=0.3628;landscape=0.0681;river=0.0418;lake=0.0306	strong
+OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		forest=0.1589;tree=0.1422;landscape=0.0235;river=0.0147;lake=0.0074	forest=0.4512;tree=0.3628;landscape=0.0681;river=0.0418;lake=0.0306	strong	forest;tree;landscape;river
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
 #summary	ok=1	err=1	ms=40
 ```
