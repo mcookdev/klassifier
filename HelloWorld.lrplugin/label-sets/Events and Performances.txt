@@ -1,0 +1,52 @@
+# Events and Performances: concerts, theater, galas, shows and parties.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Performances
+concert
+band playing
+singer
+musician
+orchestra
+choir
+theater play
+musical
+dance performance
+ballet
+circus
+acrobat
+juggler
+clown
+magician
+comedian
+stage
+spotlight
+curtain call
+
+# Crowd and audience
+audience
+crowd
+applause
+front row
+
+# Formal events
+gala
+banquet
+award ceremony
+speaker at a podium
+presentation
+conference
+formal dinner
+prom
+red carpet
+
+# Parties and fairs
+party
+dancing
+festival
+fair
+carnival ride
+parade
+fireworks
+costume party

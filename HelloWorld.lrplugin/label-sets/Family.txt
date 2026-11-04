@@ -1,0 +1,73 @@
+# Family: family life, kids and get-togethers.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# People
+family portrait
+group photo
+couple
+baby
+toddler
+child
+teenager
+grandparents
+grandparent with grandchild
+parent with child
+siblings
+cousins
+selfie
+
+# Moments
+hug
+laughing
+smiling
+kiss
+sleeping baby
+playing
+reading a book
+eating
+cooking together
+
+# Celebrations
+birthday party
+birthday cake
+blowing out candles
+opening presents
+christmas
+christmas tree
+thanksgiving dinner
+easter egg hunt
+halloween costume
+wedding
+anniversary
+graduation
+prom
+baby shower
+
+# School and activities
+first day of school
+school play
+recital
+concert
+sports game
+swimming
+dance class
+
+# Outings
+vacation
+beach day
+theme park
+zoo
+park
+playground
+camping
+road trip
+swimming pool
+museum visit
+
+# Home and pets
+home
+backyard
+dog
+cat

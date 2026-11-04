@@ -18,7 +18,8 @@ Usage: hello-app [options] [paths...]
 
   --list <file>    Read photo paths from <file>, one per line (UTF-8)
   --top <n>        Report the <n> best-scoring labels per photo (default 5)
-  --labels <file>  Labels to score against (default: labels.txt next to the exe)
+  --labels <file>  Labels to score against; repeat to merge several files
+                   (default: label-sets/General.txt next to the exe)
   --cpu            Don't use the GPU
   --no-classify    Only read the previews; needs no model files
   --dump <dir>     Save each loaded image, at most 1024 px, as <dir>/<file name>.jpg";
@@ -31,7 +32,7 @@ struct Args {
     paths: Vec<PathBuf>,
     dump: Option<PathBuf>,
     top: usize,
-    labels: Option<PathBuf>,
+    labels: Vec<PathBuf>,
     classify: bool,
     use_gpu: bool,
 }
@@ -60,7 +61,7 @@ fn main() -> ExitCode {
 /// Returns `None` when help was requested.
 fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
     let mut args =
-        Args { paths: Vec::new(), dump: None, top: DEFAULT_TOP, labels: None, classify: true, use_gpu: true };
+        Args { paths: Vec::new(), dump: None, top: DEFAULT_TOP, labels: Vec::new(), classify: true, use_gpu: true };
     let mut it = raw.into_iter();
     while let Some(arg) = it.next() {
         match arg.to_str() {
@@ -78,7 +79,7 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
                 );
             }
             Some("--dump") => args.dump = Some(PathBuf::from(it.next().context("--dump needs a directory")?)),
-            Some("--labels") => args.labels = Some(PathBuf::from(it.next().context("--labels needs a file")?)),
+            Some("--labels") => args.labels.push(PathBuf::from(it.next().context("--labels needs a file")?)),
             Some("--top") => {
                 let n = it.next().context("--top needs a number")?;
                 args.top = n
@@ -104,8 +105,12 @@ fn load_classifier(args: &Args) -> Result<(Classifier, u128)> {
     let started = Instant::now();
     let exe = std::env::current_exe().context("cannot find the exe's folder")?;
     let dir = exe.parent().context("cannot find the exe's folder")?;
-    let labels_file = args.labels.clone().unwrap_or_else(|| dir.join("labels.txt"));
-    let labels = siglip::read_labels(&labels_file)?;
+    let label_files = if args.labels.is_empty() {
+        vec![dir.join("label-sets").join("General.txt")]
+    } else {
+        args.labels.clone()
+    };
+    let labels = siglip::read_labels(&label_files)?;
     siglip::init_runtime(dir)?;
     let files = ModelFiles::in_dir(&dir.join("models").join("siglip"));
     let classifier = Classifier::new(&files, labels, &std::env::temp_dir(), args.use_gpu)?;

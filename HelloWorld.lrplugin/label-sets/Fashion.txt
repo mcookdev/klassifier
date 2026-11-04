@@ -1,0 +1,42 @@
+# Fashion: for runway shows, backstage and fashion shoots.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Show
+fashion show
+runway
+fashion model
+catwalk
+audience
+stage
+front row
+designer
+photographer
+
+# Backstage
+backstage
+makeup
+makeup artist
+hair styling
+hairdresser
+nail salon
+dressing room
+mirror
+getting dressed
+
+# Clothing and details
+dress
+gown
+suit
+shoes
+jewelry
+handbag
+hat
+fabric
+
+# Shots
+portrait
+group photo
+close-up
+full body

@@ -1,0 +1,77 @@
+# City and Street: cityscapes, architecture and street photography.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Cityscapes
+city skyline
+skyscraper
+city at night
+city lights
+aerial view of a city
+rooftops
+river in a city
+bridge
+harbor
+pier
+
+# Architecture
+architecture
+historic building
+modern building
+cathedral
+church interior
+castle
+palace
+tower
+monument
+statue
+fountain
+museum
+stained glass
+staircase
+archway
+
+# Streets
+street
+alley
+town square
+cobblestone street
+crosswalk
+sidewalk cafe
+market
+shop window
+storefront
+neon sign
+graffiti
+street art
+
+# People on the street
+pedestrians
+crowd
+street performer
+protest
+parade
+tourists
+pigeons
+seagull
+person walking
+person sitting on a bench
+
+# Getting around
+traffic
+car
+taxi
+bus
+train
+subway
+train station
+bicycle
+boat
+
+# Look
+reflection
+silhouette
+shadows
+black and white
+long exposure

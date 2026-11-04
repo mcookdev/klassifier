@@ -1,0 +1,87 @@
+# Nature: wildlife, landscapes and close-ups.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Birds
+bird
+bird in flight
+egret
+heron
+seagull
+duck
+owl
+eagle
+hummingbird
+parrot
+
+# Animals
+wildlife
+deer
+squirrel
+rabbit
+fox
+bear
+horse
+cow
+goat
+sheep
+lizard
+frog
+snake
+
+# Sea life
+sea turtle
+sea lion
+dolphin
+whale
+fish
+seahorse
+coral reef
+aquarium
+tide pool
+
+# Insects and close-ups
+insect
+butterfly
+bee
+dragonfly
+spider
+flower
+flower close-up
+leaf
+mushroom
+
+# Landscapes
+landscape
+mountain
+volcano
+lava
+canyon
+valley
+hills
+cliff
+sea arch
+rocky coast
+beach
+ocean waves
+lake
+river
+waterfall
+forest
+giant tree
+hiking trail
+jungle
+meadow
+desert
+glacier
+
+# Sky and weather
+sunset
+sunrise
+starry night sky
+clouds
+storm
+rainbow
+fog
+snow

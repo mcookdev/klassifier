@@ -1,0 +1,52 @@
+# Sports: games, players and fans.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Sports
+baseball
+softball
+basketball
+football
+soccer
+hockey
+volleyball
+tennis
+golf
+swimming
+track and field
+running race
+cycling
+gymnastics
+martial arts
+wrestling
+skiing
+snowboarding
+skateboarding
+surfing
+horse riding
+bowling
+roller derby
+roller skating
+ice skating
+
+# Moments
+player in action
+team photo
+huddle
+celebration
+coach
+referee
+scoreboard
+trophy
+medal ceremony
+
+# Places and fans
+stadium
+arena
+field
+court
+fans in the stands
+mascot
+cheerleaders
+tailgate party

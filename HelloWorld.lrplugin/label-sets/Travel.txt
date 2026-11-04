@@ -1,0 +1,66 @@
+# Travel: sightseeing, landmarks, vacations and getting there.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Landmarks and sights
+famous landmark
+castle
+palace
+cathedral
+ruins
+ancient stone monument
+museum
+art gallery
+statue
+tower
+bridge
+old town
+city skyline
+village
+countryside
+vineyard
+
+# Places to stay and eat
+hotel
+hotel room
+resort pool
+restaurant
+sidewalk cafe
+street market
+souvenir shop
+
+# Getting there
+airplane
+view from an airplane window
+airport
+cruise ship
+on the deck of a ship
+ferry
+train
+train station
+rental car
+road trip
+map
+
+# Beach and outdoors
+tropical beach
+palm trees
+snorkeling
+boat tour
+helicopter tour
+hiking
+scenic viewpoint
+mountains
+waterfall
+sunset
+
+# Doing things
+tourists
+guided tour
+selfie at a landmark
+group of travelers
+theme park
+roller coaster
+show or performance
+local food

@@ -1,0 +1,43 @@
+# Pets: dogs, cats and other animals at home.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Dogs
+dog
+puppy
+dog playing fetch
+dog on a walk
+dog sleeping
+dog portrait
+dog at the beach
+dog in the snow
+
+# Cats
+cat
+kitten
+cat sleeping
+cat portrait
+
+# Other pets
+rabbit
+hamster
+guinea pig
+bird in a cage
+fish tank
+turtle
+horse
+lizard
+
+# With people
+child with a pet
+person petting a dog
+person holding a cat
+
+# Places and things
+dog bed
+pet toy
+veterinarian
+dog park
+backyard
+couch

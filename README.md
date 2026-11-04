@@ -89,8 +89,10 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 - Select one or more photos (optional).
 - Go to **File > Plug-in Extras > Classify Photos** (or **Library > Plug-in
   Extras > Classify Photos**).
-- If nothing is selected, Lightroom targets the whole filmstrip. The plugin
-  asks before processing more than 500 photos.
+- A dialog asks for the label set and optional hints (see below), then
+  classifies when you click **Classify N photos**. If nothing is selected,
+  Lightroom targets the whole filmstrip, so check the count. Above 500 photos
+  the dialog warns that it can take a while.
 - Videos are skipped. Virtual copies that share a file with another targeted
   photo are processed only once.
 - Photos go to `hello-app.exe` 100 at a time, with a progress bar. Cancel
@@ -121,14 +123,57 @@ own. It's low even for clear matches (often 5-30%). It's in the app's output
 and is what a keyword cutoff should use, since it means the same thing in
 every photo.
 
-### Labels
+### Labels, label sets and hints
 
-`HelloWorld.lrplugin/labels.txt` lists the labels, one per line. Lines
-starting with `#` are comments. Each label becomes the prompt
-"a photo of <label>". Concrete nouns ("dog", "bridge", "birthday party") work
-better than abstract ideas. After editing, run `make deploy`. The first
-classification after a change computes the label embeddings with the text
-model (a second or two) and caches them in `%TEMP%`.
+The model can only choose among the labels it's given. If a photo gets an odd
+label (backstage makeup coming out as "halloween"), the list probably has
+nothing closer. The fix is to add a label that describes it.
+
+- **Label sets** are the `.txt` files in `HelloWorld.lrplugin/label-sets/`,
+  one label per line, with `#` comments. To add a set, add a file and run
+  `make deploy`. It then appears in the dialog's **Label set** menu. The
+  plugin comes with:
+  - **General** (the default): a bit of everything.
+  - **Nature**: birds and other wildlife, sea life, insects, flowers,
+    landscapes (volcanoes, lava, coast, waterfalls) and weather.
+  - **City and Street**: skylines, architecture, churches, streets,
+    markets, people on the street and transport.
+  - **Family**: kids and family members, hugs and other moments,
+    birthdays, holidays and other celebrations, school events, outings and
+    pets.
+  - **Fashion**: runway shows, backstage hair and makeup, and clothing.
+  - **Travel**: landmarks, hotels and restaurants, planes, ships and
+    trains, beaches and tours.
+  - **Wedding**: the wedding party, getting ready, ceremony, reception
+    moments (first dance, cutting the cake, bouquet toss) and details.
+  - **Events and Performances**: concerts, theater and musicals, circus
+    acts, galas and award ceremonies, parties and festivals.
+  - **Sports**: most team and individual sports (including roller derby),
+    game moments, venues and fans.
+  - **Pets**: dogs, cats and other pets, alone or with people.
+  - **Food and Drink**: meals, dishes, sweets, drinks, cooking and baking.
+  - **Portraits**: the kind of portrait, its style (posed, candid, studio,
+    lighting), framing and expression.
+  - **Cleanup**: finds screenshots, documents, receipts and other
+    non-photos, plus duds (blurry, very dark or accidental shots). Ordinary
+    photos get plain labels like "child" or "landscape". Sort by the top
+    label rather than the match level, which is low for this set.
+
+  A narrow set gives more specific labels ("egret" rather than "bird") but
+  can only pick from its own labels. A photo that doesn't fit the set shows
+  as a weak match.
+- **Hints** are extra labels for one run, typed in the dialog separated by
+  commas (e.g. `makeup, hair styling, backstage`). They're added to the
+  chosen set. Tick **Use only the hints** to label photos from your hints
+  alone.
+- The dialog remembers the last set, hints and checkbox.
+
+Each label becomes the prompt "a photo of <label>". Concrete nouns and short
+phrases ("dog", "makeup artist", "birthday party") work better than abstract
+ideas, and hints have to be labels like these, not a description of the
+shoot. A new combination of labels takes a second or two the first time while
+the text model computes them. They're then cached in `%TEMP%`, and repeating
+the same set and hints costs nothing extra.
 
 ### How RAW files are read
 
@@ -146,8 +191,9 @@ hello-app.exe [options] [paths...]
 
 - `--list <file>` reads photo paths from a UTF-8 file, one per line.
 - `--top <n>` reports the `n` best labels per photo (default 5).
-- `--labels <file>` uses another labels file instead of `labels.txt` next to
-  the exe.
+- `--labels <file>` scores against the labels in `<file>`. Repeat it to
+  merge several files; labels in more than one are kept once. The default is
+  `label-sets/General.txt` next to the exe.
 - `--cpu` doesn't use the GPU.
 - `--no-classify` only reads the previews. It needs no model files.
 - `--dump <dir>` saves each loaded image, at most 1024 px, as

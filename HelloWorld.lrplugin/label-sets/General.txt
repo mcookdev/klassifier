@@ -1,6 +1,9 @@
+# General: the default label set.
+#
 # Labels the classifier scores each photo against, one per line.
 # Blank lines and lines starting with # are ignored. Each label is
-# scored on its own, so several can match the same photo.
+# scored on its own, so several can match the same photo. The plugin
+# offers every .txt file in this folder as a label set.
 
 # People
 portrait
@@ -98,6 +101,20 @@ screenshot
 painting
 sculpture
 sign
+
+# Fashion and beauty
+fashion show
+runway
+fashion model
+backstage
+makeup
+makeup artist
+hair styling
+hairdresser
+beauty salon
+audience
+stage
+photographer
 
 # Activities
 hiking

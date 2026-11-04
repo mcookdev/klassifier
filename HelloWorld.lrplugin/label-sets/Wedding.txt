@@ -1,0 +1,54 @@
+# Wedding: ceremony, reception, portraits and details.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# People
+bride
+groom
+bride and groom
+bridesmaids
+groomsmen
+wedding party
+flower girl
+ring bearer
+parents of the bride
+wedding guests
+officiant
+
+# Getting ready
+bride getting ready
+wedding dress
+groom getting ready
+putting on a tie
+hair and makeup
+
+# Ceremony
+wedding ceremony
+walking down the aisle
+exchanging rings
+first kiss
+church wedding
+outdoor wedding
+
+# Reception
+wedding reception
+first dance
+dancing
+toast
+speech
+cutting the cake
+wedding cake
+bouquet toss
+garter toss
+dinner table
+dj
+
+# Details
+wedding rings
+bouquet
+flowers
+table decorations
+invitation
+place cards
+venue

@@ -1,0 +1,60 @@
+# Food and Drink: meals, dishes, baking and drinks.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Meals
+breakfast
+brunch
+lunch
+dinner
+picnic
+barbecue
+family dinner
+restaurant meal
+fast food
+street food
+
+# Dishes
+pizza
+burger
+sandwich
+pasta
+salad
+soup
+sushi
+steak
+seafood
+tacos
+fruit
+vegetables
+bread
+
+# Sweets
+cake
+birthday cake
+cupcakes
+cookies
+ice cream
+dessert
+chocolate
+donuts
+pie
+
+# Drinks
+coffee
+tea
+wine
+beer
+cocktail
+juice
+
+# Making it
+cooking
+baking
+kitchen
+grocery store
+farmers market
+food on a plate
+table setting
+menu

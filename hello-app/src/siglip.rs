@@ -208,17 +208,28 @@ fn rank(labels: &[String], logits: &[f32], top: usize) -> Vec<LabelScore> {
         .collect()
 }
 
-/// Reads a labels file: one label per line; blank lines and `#` comments are skipped, and
-/// duplicates are dropped.
-pub fn read_labels(path: &Path) -> Result<Vec<String>> {
-    let text = fs::read_to_string(path).with_context(|| format!("cannot read labels file {}", path.display()))?;
+/// Reads and merges labels files: one label per line; blank lines and `#` comments are
+/// skipped. Labels the model would see as the same ("Makeup", "makeup") are kept once, in
+/// the spelling first seen.
+pub fn read_labels(paths: &[PathBuf]) -> Result<Vec<String>> {
     let mut labels: Vec<String> = Vec::new();
-    for line in text.lines().map(str::trim) {
-        if !line.is_empty() && !line.starts_with('#') && !labels.iter().any(|l| l == line) {
-            labels.push(line.to_string());
+    let mut seen: Vec<String> = Vec::new();
+    for path in paths {
+        let text =
+            fs::read_to_string(path).with_context(|| format!("cannot read labels file {}", path.display()))?;
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        for line in text.lines().map(str::trim) {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let key = prompt(line);
+            if !seen.contains(&key) {
+                seen.push(key);
+                labels.push(line.to_string());
+            }
         }
     }
-    ensure!(!labels.is_empty(), "labels file {} has no labels", path.display());
+    ensure!(!labels.is_empty(), "no labels in {}", paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
     Ok(labels)
 }
 
@@ -418,6 +429,20 @@ mod tests {
         assert_eq!(MatchLevel::from_best_score(0.12), MatchLevel::Strong);
         assert_eq!(MatchLevel::from_best_score(0.03), MatchLevel::Good);
         assert_eq!(MatchLevel::from_best_score(0.004), MatchLevel::Weak);
+    }
+
+    #[test]
+    fn label_files_are_merged_without_duplicates() {
+        let dir = std::env::temp_dir().join(format!("hello-app-labels-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let set = dir.join("set.txt");
+        let hints = dir.join("hints.txt");
+        fs::write(&set, "# comment\ndog\n\nmakeup\ndog\n").unwrap();
+        fs::write(&hints, "\u{feff}Makeup\nhair styling\r\n").unwrap();
+        assert_eq!(read_labels(&[set.clone(), hints.clone()]).unwrap(), ["dog", "makeup", "hair styling"]);
+        fs::write(&set, "# nothing\n").unwrap();
+        assert!(read_labels(&[set]).is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

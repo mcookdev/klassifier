@@ -1,0 +1,58 @@
+# Cleanup: find screenshots, documents, duds and shots to cull.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Not really photos
+screenshot
+phone screenshot
+text document
+receipt
+handwritten note
+whiteboard
+scanned paper
+form
+business card
+ticket
+sign with text
+map
+diagram
+qr code
+photo of a computer screen
+photo of a tv screen
+photo of a photo
+
+# Duds
+blurry photo
+out of focus photo
+motion blur
+very dark photo
+overexposed photo
+accidental photo of the ground
+photo of a pocket
+finger over the lens
+lens cap on
+eyes closed
+
+# Ordinary photos. These give good shots somewhere to go, so only real
+# duds and non-photos match the labels above.
+photo of people
+group photo
+portrait
+child
+baby
+landscape
+city street
+building
+indoor scene
+animal
+food
+event
+night scene
+
+# Reference shots
+product label
+serial number
+parking spot
+car damage
+something to buy

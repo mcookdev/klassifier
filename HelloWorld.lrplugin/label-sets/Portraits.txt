@@ -1,0 +1,44 @@
+# Portraits: kinds of portraits, framing and style.
+#
+# One label per line; blank lines and lines starting with # are ignored.
+# Pick this set in the Classify Photos dialog, alone or with hints.
+
+# Kind
+headshot
+portrait of a man
+portrait of a woman
+portrait of a child
+baby portrait
+senior portrait
+couple portrait
+family portrait
+group portrait
+self portrait
+pet portrait
+
+# Style
+posed portrait
+candid photo
+studio portrait
+outdoor portrait
+environmental portrait
+black and white portrait
+silhouette
+backlit portrait
+dramatic lighting
+soft natural light
+
+# Framing
+close-up of a face
+head and shoulders
+half body
+full body
+profile view
+looking at the camera
+looking away
+eyes closed
+
+# Expression
+smiling
+laughing
+serious expression
