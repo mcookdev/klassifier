@@ -1,0 +1,3 @@
+{
+  "diagnostics.globals": ["import", "WIN_ENV", "MAC_ENV", "_PLUGIN"]
+}

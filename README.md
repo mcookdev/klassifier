@@ -1,54 +1,67 @@
 # Hello World Lightroom Plugin
 
 A minimal Lightroom Classic plug-in that adds a "Say Hello" command under
-**File > Plug-in Extras** and **Library > Plug-in Extras**. It shows a
-greeting dialog with the number of currently selected photos.
+**File > Plug-in Extras** and **Library > Plug-in Extras**. It runs a small
+Windows console app (`hello-app.exe`, written in Rust) and shows the app's
+output in a dialog, along with the number of currently selected photos.
 
 ## Requirements
 
-- Adobe Lightroom Classic (SDK 6.0 or later, i.e. Lightroom 6 / CC Classic and newer)
+- Adobe Lightroom Classic (SDK 6.0 or later) on Windows
+- WSL with Rust (`cargo`) and `make` for building
+
+## Building
+
+One-time setup (in WSL):
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+sudo apt update && sudo apt install -y gcc-mingw-w64-x86-64
+```
+
+Build and deploy:
+
+```bash
+make deploy
+```
+
+Or press **Ctrl+Shift+B** in VS Code. This cross-compiles `hello-app.exe` and
+copies the plugin folder, with the exe inside it, to
+`C:\Users\cadre\lr-plugins\HelloWorld.lrplugin`. To deploy somewhere else:
+
+```bash
+make deploy DEPLOY_DIR=/mnt/c/somewhere
+```
 
 ## Installation
 
-1. Copy (or clone) the `HelloWorld.lrplugin` folder to a location on disk.
-   Lightroom reads the plugin directly from this folder, so keep it
-   somewhere permanent (it doesn't need to be copied into the Lightroom
-   app directory).
-
-2. Open Lightroom Classic.
-
-3. Go to **File > Plug-in Manager**.
-
-4. Click **Add** in the bottom-left corner.
-
-5. Browse to and select the `HelloWorld.lrplugin` folder, then click
-   **Add Plug-in**.
-
-6. Confirm the plugin shows up in the list as "Hello World" with status
-   "Installed and running". Click **Done** to close the manager.
+1. Run `make deploy`.
+2. Open Lightroom Classic and go to **File > Plug-in Manager**.
+3. Click **Add** and select `C:\Users\cadre\lr-plugins\HelloWorld.lrplugin`.
+   Don't add the repo's `HelloWorld.lrplugin` folder; it doesn't contain the exe.
+4. Confirm the plugin shows up as "Hello World" with status
+   "Installed and running". Click **Done**.
 
 ## Usage
 
 - Select one or more photos (optional).
 - Go to **File > Plug-in Extras > Say Hello** (or **Library > Plug-in
   Extras > Say Hello**).
-- A dialog appears greeting you and reporting how many photos are
-  targeted.
+- A dialog shows the message returned by `hello-app.exe` and how many photos
+  are targeted. A console window may flash briefly while the app runs.
 
 ## Updating the plugin
 
-If you edit the plugin's Lua files while Lightroom is running, use
-**File > Plug-in Manager > Reload Plug-in** (select the plugin first)
-to pick up changes without restarting Lightroom.
+Run `make deploy`, then in **File > Plug-in Manager** select the plugin and
+click **Reload Plug-in**.
 
 ## Logs
 
-The plugin writes to `HelloWorld.log` in Lightroom's logs folder when
-"Say Hello" is invoked, useful for debugging via **File > Plug-in
-Manager**'s log file link or the folder shown there.
+The plugin writes to `HelloWorld.log` in Lightroom's logs folder, including
+the exact command line used to run `hello-app.exe`. Open it from the
+Plug-in Manager's log file link.
 
 ## Uninstalling
 
 Open **File > Plug-in Manager**, select "Hello World", and click
-**Remove**. You can then delete the `HelloWorld.lrplugin` folder from
-disk if desired.
+**Remove**. You can then delete `C:\Users\cadre\lr-plugins\HelloWorld.lrplugin`.

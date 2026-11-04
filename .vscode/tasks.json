@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build & deploy plugin",
+      "type": "shell",
+      "command": "make deploy",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$rustc"]
+    }
+  ]
+}
