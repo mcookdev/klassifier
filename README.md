@@ -20,7 +20,8 @@ upright using their EXIF orientation.
 ## Requirements
 
 - Adobe Lightroom Classic (SDK 6.0 or later) on Windows
-- WSL with Rust (`cargo`) and `make` for building
+- WSL with Rust (`cargo`), `make`, `curl`, `python3` and `rsync` for building
+  (the last three are usually preinstalled on Ubuntu)
 
 ## Building
 
@@ -129,7 +130,10 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   copy are in the batch and both get its keywords; "virtual copy" means only
   a virtual copy was selected. The totals count each photo, so a keyword on a
   photo and its copy counts twice. It's one step
-  in **Edit > Undo**.
+  in **Edit > Undo**. If no photo would get a keyword, it says so and adds
+  nothing. If Lightroom's catalog is busy, nothing is added and the review
+  window opens again with your choices kept, so you can click **Accept All**
+  again.
 - **Cancel** closes the window without changing anything.
 - **Details...** opens the classification report: each photo's match level,
   its top 10 labels and suggestions, the preview size and where it came from,
@@ -140,10 +144,13 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 
 ```
 IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
-        Halloween 93%, Costume 7%, Child 1%, Baby <1%, Holiday <1%
+        Halloween 93%, Costume 4%, Child 1%, Baby <1%, Holiday <1%, Party <1%, Mask <1%, Makeup <1%, Portrait <1%, Family <1%
         Suggested: Halloween, Costume
 ```
 
+- **SMALL PREVIEW** after the heading means the image the app read is
+  under 224 px on its long edge, the size the model works at, so the labels
+  are less reliable. The summary at the top counts these.
 - The percentages are each label's share of the photo's total score across
   all labels. They show how the labels compare for this photo.
 - Shares always add up to 100%, so some label gets a big share even when
@@ -170,9 +177,10 @@ nothing closer. The fix is to add a label that describes it.
 - **Label sets** are the `.txt` files in `Klassifier.lrplugin/label-sets/`,
   one label per line, with `#` comments. Each label is also the name of the
   keyword it becomes, so the sets spell labels the way keywords should look
-  (Title Case: `Bird in Flight`, `QR Code`). Case doesn't matter to the
-  model, which lowercases every label, so changing it never changes the
-  scores. To add a set, add a file and run
+  (Title Case: `Bird in Flight`, `QR Code`). Case and punctuation don't
+  matter to the model, which lowercases every label and drops punctuation
+  (`Close-Up` and `closeup` are the same label to it), so changing them
+  never changes the scores. To add a set, add a file and run
   `make deploy`. It then appears in the dialog's **Label set** menu. The
   plugin comes with:
   - **General** (the default): a bit of everything.
@@ -205,9 +213,10 @@ nothing closer. The fix is to add a label that describes it.
   can only pick from its own labels. A photo that doesn't fit the set shows
   as a weak match.
 - **Hints** are extra labels for one run, typed in the dialog separated by
-  commas (e.g. `makeup, hair styling, backstage`). They're added to the
-  chosen set. Tick **Use only the hints** to label photos from your hints
-  alone.
+  commas or semicolons (e.g. `makeup, hair styling, backstage`). They're
+  added to the chosen set. Tick **Use only the hints** to label photos from
+  your hints alone. Hints can't map to nested keywords: the dialog refuses a
+  hint containing `=>`.
 - The dialog remembers the last set, hints and checkbox.
 
 Each label becomes the prompt "a photo of <label>". Concrete nouns and short
@@ -241,6 +250,9 @@ name, like `bird =>` or `bird => Wildlife >> Bird`, is an error that names
 the file and line. The **Nature** set maps its birds and animals this way, as
 an example. Hints can't have mappings.
 
+Labels the model sees as the same (`Makeup` in a set and `makeup` as a hint)
+are kept once, in the spelling and with the mapping seen first.
+
 ### How RAW files are read
 
 For RAW files the app uses the JPEG preview embedded in the file and never
@@ -261,7 +273,7 @@ klassifier.exe [options] [paths...]
   to 1 (default 0.01). At most 5 are suggested, and only from the `--top`
   labels.
 - `--labels <file>` scores against the labels in `<file>`. Repeat it to
-  merge several files; labels in more than one are kept once. The default is
+  merge several files; a label in more than one is kept once. The default is
   `label-sets/General.txt` next to the exe.
 - `--cpu` doesn't use the GPU.
 - `--no-classify` only reads the previews. It needs no model files.
@@ -272,7 +284,7 @@ The output is tab-separated, one line per photo (format documented in
 `klassifier/src/output.rs`):
 
 ```
-#klassifier	2.0.0	backend=DirectML
+#klassifier	2.0.1	backend=DirectML
 #model	load_ms=520	labels=98	label_cache=hit
 OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		Forest=0.1589;Tree=0.1422;Landscape=0.0235;River=0.0147;Lake=0.0074	Forest=0.4512;Tree=0.3628;Landscape=0.0681;River=0.0418;Lake=0.0306	strong	Forest;Tree;Landscape;River	
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic

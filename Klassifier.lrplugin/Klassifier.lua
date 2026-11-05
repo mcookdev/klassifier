@@ -236,12 +236,22 @@ local function askOptions(context, photoCount)
 	}
 	if result ~= 'ok' then return nil end
 
+	-- Saved before checking, so a rejected entry is still there to fix next time.
+	prefs.labelSet, prefs.hints, prefs.onlyHints = props.labelSet, props.hints, props.onlyHints
 	local options = { labelSet = props.labelSet, hints = parseHints(props.hints), onlyHints = props.onlyHints }
 	if options.onlyHints and #options.hints == 0 then
 		LrDialogs.message('Classify Photos', 'Enter at least one hint, or untick "Use only the hints".', 'warning')
 		return nil
 	end
-	prefs.labelSet, prefs.hints, prefs.onlyHints = props.labelSet, props.hints, props.onlyHints
+	-- The hints file is read like a label set, so "=>" would map a hint to a nested keyword.
+	for _, hint in ipairs(options.hints) do
+		if hint:find('=>', 1, true) then
+			LrDialogs.message('Classify Photos',
+				'Hints can\'t map to nested keywords: remove "=>" from "' .. hint .. '".\n' ..
+				'Put mappings in a label set file instead.', 'warning')
+			return nil
+		end
+	end
 	return options
 end
 
