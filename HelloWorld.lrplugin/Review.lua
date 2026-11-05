@@ -1,7 +1,8 @@
 --[[----------------------------------------------------------------------------
   Review.lua
   The review window: a paged grid of the classified photos with their suggested
-  keywords, and Accept All / Cancel.
+  keywords, and Accept All / Cancel. Keywords... on a photo opens its keyword
+  view, where the suggestions can be ticked and unticked.
 
   An item is one classified file:
     { path, name, photos = { LrPhoto... },   -- photos sharing the file (virtual copies)
@@ -10,16 +11,18 @@
       chosen = nil | { [label] = true } }    -- the user's choice, once edited
 ------------------------------------------------------------------------------]]
 
-local LrBinding = import 'LrBinding'
-local LrDialogs = import 'LrDialogs'
-local LrTasks   = import 'LrTasks'
-local LrView    = import 'LrView'
+local LrBinding         = import 'LrBinding'
+local LrDialogs         = import 'LrDialogs'
+local LrFunctionContext = import 'LrFunctionContext'
+local LrTasks           = import 'LrTasks'
+local LrView            = import 'LrView'
 
 local Review = {}
 
 local COLUMNS, ROWS = 4, 3
 local PER_PAGE = COLUMNS * ROWS
 local THUMB = 150
+local DETAIL_THUMB = 400
 -- File names longer than this are shortened in the middle to fit under the thumbnail.
 local NAME_CHARS = 24
 
@@ -36,6 +39,14 @@ function Review.keywordsFor(item)
 		if set[label] then labels[#labels + 1] = label end
 	end
 	return labels
+end
+
+-- The keywords to write for `item`, each as a list of names from the top level down.
+-- Labels are top-level keywords named as written.
+function Review.keywordPaths(item)
+	local paths = {}
+	for _, label in ipairs(Review.keywordsFor(item)) do paths[#paths + 1] = { label } end
+	return paths
 end
 
 -- Keyword assignments and photos that would get at least one, over all items.
@@ -101,6 +112,49 @@ local function fillPage(props, items, page)
 	props.totals = totalsLine(items)
 end
 
+-- Shows `item`'s keyword view: its photo and a checkbox per candidate label. Accept saves the
+-- ticked labels as `item.chosen` and returns true; Cancel leaves `item` unchanged.
+-- Shows a modal dialog, so call it from a task.
+local function openDetail(item)
+	return LrFunctionContext.callWithContext('Review.openDetail', function(context)
+		local f = LrView.osFactory()
+		local bind = LrView.bind
+		local props = LrBinding.makePropertyTable(context)
+		local set = item.chosen or item.suggested
+		local boxes = { spacing = f:label_spacing() }
+		for i, label in ipairs(item.candidates) do
+			props['c' .. i] = set[label] == true
+			boxes[#boxes + 1] = f:checkbox { title = label, value = bind('c' .. i) }
+		end
+		if #item.candidates == 0 then
+			boxes[#boxes + 1] = f:static_text { title = '(no labels)' }
+		end
+
+		local result = LrDialogs.presentModalDialog {
+			title = 'Keywords: ' .. item.name,
+			contents = f:column {
+				bind_to_object = props,
+				spacing = f:control_spacing(),
+				f:static_text { title = item.name },
+				f:row {
+					spacing = f:control_spacing(),
+					f:catalog_photo { photo = item.photos[1], width = DETAIL_THUMB, height = DETAIL_THUMB },
+					f:column(boxes),
+				},
+			},
+			actionVerb = 'Accept',
+			cancelVerb = 'Cancel',
+		}
+		if result ~= 'ok' then return false end
+		local chosen = {}
+		for i, label in ipairs(item.candidates) do
+			if props['c' .. i] then chosen[label] = true end
+		end
+		item.chosen = chosen
+		return true
+	end)
+end
+
 -- Shows the review window for `items` (at least one). `notes` is extra header text (skipped
 -- files, cancel). `showDetails`, if given, adds a Details... button that calls it (it may
 -- show a modal dialog). Returns 'ok' (Accept All) or 'cancel'.
@@ -117,13 +171,25 @@ function Review.show(context, items, notes, showDetails)
 		local row = { spacing = f:control_spacing() }
 		for c = 1, COLUMNS do
 			-- visible works on controls, not on a column (spike S1), so each control gets it.
-			local key = 's' .. ((r - 1) * COLUMNS + c) .. '_'
+			local n = (r - 1) * COLUMNS + c
+			local key = 's' .. n .. '_'
 			local visible = bind(key .. 'visible')
 			row[#row + 1] = f:column {
 				width = THUMB,
 				f:catalog_photo { photo = bind(key .. 'photo'), width = THUMB, height = THUMB, visible = visible },
 				f:static_text { title = bind(key .. 'name'), width = THUMB, visible = visible },
 				f:static_text { title = bind(key .. 'status'), width = THUMB, visible = visible },
+				f:push_button {
+					title = 'Keywords...',
+					visible = visible,
+					action = function()
+						local item = items[(props.page - 1) * PER_PAGE + n]
+						if not item then return end
+						LrTasks.startAsyncTask(function()
+							if openDetail(item) then fillPage(props, items, props.page) end
+						end)
+					end,
+				},
 			}
 		end
 		grid[#grid + 1] = f:row(row)

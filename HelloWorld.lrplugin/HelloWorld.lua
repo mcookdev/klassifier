@@ -2,7 +2,7 @@
   HelloWorld.lua
   Asks for a label set and optional hints, runs hello-app.exe on the targeted
   photos in chunks, and opens the review window (Review.lua) with the keywords
-  it suggests for each one.
+  it suggests for each one. Accept All writes them (Keywords.lua).
 ------------------------------------------------------------------------------]]
 
 local LrApplication     = import 'LrApplication'
@@ -17,7 +17,8 @@ local LrProgressScope   = import 'LrProgressScope'
 local LrTasks           = import 'LrTasks'
 local LrView            = import 'LrView'
 
-local Review = require 'Review'
+local Keywords = require 'Keywords'
+local Review   = require 'Review'
 
 local logger = LrLogger('HelloWorld')
 logger:enable('logfile') -- writes to HelloWorld.log in the Lightroom logs folder
@@ -421,16 +422,22 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 	if cancelled then
 		notes = notes .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 	end
-	local result = Review.show(context, items, notes, function() showReport(summary, lines) end)
-	if result ~= 'ok' then return end
-
-	-- Pass 2a: a dry run. Writing the keywords comes next.
-	local keywords, photos = Review.totals(items)
-	if keywords == 0 then
-		LrDialogs.message('Review keywords', 'No keywords to add.', 'info')
-	else
-		LrDialogs.message('Review keywords', string.format(
-			'Would add %d keyword(s) to %d photo(s).\n\nPreview only: nothing was written to the catalog.',
-			keywords, photos), 'info')
+	-- Reopens the review (choices kept) if the catalog is busy when writing.
+	local catalog = LrApplication.activeCatalog()
+	while true do
+		local result = Review.show(context, items, notes, function() showReport(summary, lines) end)
+		if result ~= 'ok' then return end
+		if Review.totals(items) == 0 then
+			LrDialogs.message('Review keywords', 'No keywords to add.', 'info')
+			return
+		end
+		local assigned, photos = Keywords.apply(catalog, items, Review.keywordPaths)
+		if assigned then
+			LrDialogs.message('Review keywords', string.format('Added %d keyword(s) to %d photo(s).', assigned, photos), 'info')
+			return
+		end
+		LrDialogs.message('Review keywords',
+			'Lightroom\'s catalog was busy, so no keywords were added. Your choices are kept: try Accept All again.',
+			'warning')
 	end
 end)

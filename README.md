@@ -6,8 +6,8 @@ Windows console app (`hello-app.exe`, written in Rust) on the targeted photos.
 The app scores each photo against a list of labels ("dog", "beach",
 "sunset", ...) with the [SigLIP](https://huggingface.co/google/siglip-base-patch16-224)
 image model, and the plugin shows the suggested keywords for each photo in a
-review window. Accepting them doesn't write to the catalog yet; it only
-reports what would be added.
+review window. You can accept them all at once, or adjust a photo's keywords
+first, and the plugin adds them to the photos in the catalog.
 
 The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
 to the CPU. This small model is only slightly slower on the CPU.
@@ -107,13 +107,23 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
 - The **Review keywords** window shows the photos 12 at a time (4x3), each
-  with its file name and how many keywords it suggests ("3 keywords" or "no
-  suggestions"). Use **< Prev** and **Next >** to page through them. The top
-  shows the totals, the label set, and how many files failed, were unsupported
-  or were skipped.
-- **Accept All** (at the top or bottom) is a preview for now: it reports how
-  many keywords would be added to how many photos and writes nothing.
-  **Cancel** closes the window.
+  with its file name and how many keywords it will get ("3 keywords", "no
+  suggestions", or "edited: 2 keywords" once you've changed them). Use
+  **< Prev** and **Next >** to page through them. The top shows the totals,
+  the label set, and how many files failed, were unsupported or were skipped.
+- **Keywords...** under a photo opens its keyword view: a larger preview and
+  a checkbox for each of its top 10 labels, best first, with the suggested
+  ones ticked. Tick or untick them and click **Accept** to keep your choice,
+  or **Cancel** to leave it as it was. Nothing is written yet; the photo now
+  shows as edited.
+- **Accept All** (at the top or bottom) adds each photo's keywords: your
+  choice for edited photos, the suggestions for the rest. Photos with no
+  suggestions that you didn't edit get nothing. Keywords are only added,
+  never removed, and a keyword that already exists is reused, whatever its
+  case (`bird` reuses `Bird`). New keywords are top level, named as in the
+  label set. Virtual copies of a photo get the same keywords. It's one step
+  in **Edit > Undo**.
+- **Cancel** closes the window without changing anything.
 - **Details...** opens the classification report: each photo's match level,
   its top 10 labels and suggestions, the preview size and where it came from,
   and errors. If no photo could be classified, the report opens instead of
