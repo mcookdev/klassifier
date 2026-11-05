@@ -27,6 +27,10 @@ Christmas
 Halloween
 Costume
 Parade
+Festival
+Fireworks
+Stage
+Audience
 
 # Animals
 Dog
@@ -59,6 +63,11 @@ Sky
 Clouds
 Rain
 Fog
+Storm
+Lightning
+Starry Sky
+Moon
+Autumn
 
 # Places
 City
@@ -72,18 +81,28 @@ Monument
 Museum
 Park
 Playground
+Amusement Park
 House
 Interior
 Kitchen
+Living Room
+Bedroom
+Office
+Hotel Room
 Restaurant
+Bar
+Market
 School
 Stadium
+Swimming Pool
 Road
 Airport
 Train Station
 
 # Things
 Car
+Bus
+Truck
 Boat
 Airplane
 Train
@@ -100,26 +119,18 @@ Document
 Screenshot
 Painting
 Sculpture
+Graffiti
+Musical Instrument
 Sign
-
-# Fashion and beauty
-Fashion Show
-Runway
-Fashion Model
-Backstage
-Makeup
-Makeup Artist
-Hair Styling
-Hairdresser
-Beauty Salon
-Audience
-Stage
-Photographer
 
 # Activities
 Hiking
+Running
 Swimming
+Skiing
+Fishing
 Camping
+Picnic
 Cooking
 Travel
 Shopping
@@ -130,5 +141,7 @@ Night
 Black and White
 Close-Up
 Aerial View
+Panorama
+Long Exposure
 Reflection
 Silhouette

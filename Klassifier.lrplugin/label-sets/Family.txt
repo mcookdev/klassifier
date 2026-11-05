@@ -4,14 +4,14 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # People
-Family Portrait
+Portrait
 Group Photo
 Couple
 Baby
 Toddler
 Child
 Teenager
-Grandparents
+Grandparent
 Grandparent with Grandchild
 Parent with Child
 Siblings
@@ -23,11 +23,11 @@ Hug
 Laughing
 Smiling
 Kiss
-Sleeping Baby
+Sleeping
 Playing
-Reading a Book
+Reading
 Eating
-Cooking Together
+Cooking
 
 # Celebrations
 Birthday Party
@@ -56,7 +56,7 @@ Dance Class
 
 # Outings
 Vacation
-Beach Day
+Beach
 Theme Park
 Zoo
 Park
@@ -71,3 +71,9 @@ Home
 Backyard
 Dog
 Cat
+
+# Mood
+Silly
+Angry
+Happy
+Sad
