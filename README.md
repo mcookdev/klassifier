@@ -104,22 +104,25 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 - Select one or more photos (optional).
 - Go to **File > Plug-in Extras > Classify Photos** (or **Library > Plug-in
   Extras > Classify Photos**).
-- A dialog asks for the label set and optional hints (see below), then
-  classifies when you click **Classify N photos**. If nothing is selected,
+- A dialog asks for the model (**Light**, **Medium** or **High**, see
+  [Models](#models)), the label set and optional hints (see below), then
+  classifies when you click **Classify N photos**. The menu lists the models
+  that are installed in the plugin folder. If nothing is selected,
   Lightroom targets the whole filmstrip, so check the count. Above 500 photos
   the dialog warns that it can take a while.
 - Videos are skipped. Virtual copies that share a file with another targeted
   photo are processed only once, and share its suggestions.
 - Photos go to `klassifier.exe` 100 at a time, with a progress bar. Cancel
   takes effect between batches. A console window may flash for each batch.
-  Each batch spends about half a second loading the model, then roughly
-  30 ms per ARW and 60-120 ms per CR2 or JPEG.
+  With the light model, each batch spends about half a second loading it,
+  then roughly 30 ms per ARW and 60-120 ms per CR2 or JPEG. Medium and High
+  take a little longer (see [Models](#models)).
 - The **Review keywords** window shows the photos 12 at a time (4x3), each
   with its file name and a button showing how many keywords it will get
   ("3 Keywords", "0 Keywords" when nothing was suggested, or
   "2 Keywords (edited)" once you've changed them). Use
   **< Prev** and **Next >** to page through them. The top shows the totals,
-  the label set, and how many files failed, were unsupported or were skipped.
+  the model, the label set, and how many files failed, were unsupported or were skipped.
 - That button opens the photo's keyword view: a larger preview and
   a checkbox for each of its top 10 labels, best first, with the suggested
   ones ticked. Tick or untick them and click **Accept** to keep your choice,
@@ -254,7 +257,7 @@ nothing closer. The fix is to add a label that describes it.
   added to the chosen set. Tick **Use only the hints** to label photos from
   your hints alone. Hints can't map to nested keywords: the dialog refuses a
   hint containing `=>`.
-- The dialog remembers the last set, hints and checkbox.
+- The dialog remembers the last model, set, hints and checkbox.
 
 Each label becomes the prompt "a photo of <label>". Concrete nouns and short
 phrases ("dog", "makeup artist", "birthday party") work better than abstract

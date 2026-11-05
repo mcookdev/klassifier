@@ -1,8 +1,8 @@
 --[[----------------------------------------------------------------------------
   Klassifier.lua
-  Asks for a label set and optional hints, runs klassifier.exe on the targeted
-  photos in chunks, and opens the review window (Review.lua) with the keywords
-  it suggests for each one. Accept All writes them (Keywords.lua).
+  Asks for a model, a label set and optional hints, runs klassifier.exe on the
+  targeted photos in chunks, and opens the review window (Review.lua) with the
+  keywords it suggests for each one. Accept All writes them (Keywords.lua).
 ------------------------------------------------------------------------------]]
 
 local LrApplication     = import 'LrApplication'
@@ -32,6 +32,13 @@ local WARN_ABOVE = 500
 -- Label sets are the .txt files in this folder inside the plugin.
 local LABEL_SET_DIR = 'label-sets'
 local DEFAULT_LABEL_SET = 'General'
+-- The models offered in the options dialog, the default first. `name` is klassifier.exe's
+-- --model value and the model's folder in models/ (see MODELS in klassifier/src/siglip.rs).
+local MODELS = {
+	{ name = 'siglip-base-224', title = 'Light (SigLIP base, fastest)' },
+	{ name = 'siglip2-so400m-fp16', title = 'Medium (SigLIP 2 So400m, fp16)' },
+	{ name = 'siglip2-so400m-fp32', title = 'High (SigLIP 2 So400m, fp32)' },
+}
 
 local function tempFile(name)
 	return LrFileUtils.chooseUniqueFileName(LrPathUtils.child(LrPathUtils.getStandardFilePath('temp'), name))
@@ -70,16 +77,16 @@ local function splitTabs(line)
 	return fields
 end
 
--- Runs the app on one chunk of paths. `labelArgs` are the --labels options. Returns a table
--- of path -> row fields plus what it ran on ("DirectML (<GPU name>)" or "CPU"), or nil plus
--- an error.
-local function processChunk(paths, labelArgs)
+-- Runs the app on one chunk of paths. `appArgs` are its other options (appArguments).
+-- Returns a table of path -> row fields plus what it ran on ("DirectML (<GPU name>)" or
+-- "CPU"), or nil plus an error.
+local function processChunk(paths, appArgs)
 	local listFile = tempFile('klassifier-list.txt')
 	local f = assert(io.open(listFile, 'wb'))
 	f:write(table.concat(paths, '\n'), '\n')
 	f:close()
 
-	local output, err = runKlassifier(string.format('%s --list "%s"', labelArgs, listFile))
+	local output, err = runKlassifier(string.format('%s --list "%s"', appArgs, listFile))
 	LrFileUtils.delete(listFile)
 	if not output then return nil, err end
 	logger:info(output)
@@ -173,6 +180,24 @@ local function listLabelSets()
 	return names
 end
 
+-- The MODELS whose folder is in the plugin (all of them, if none is, so the app explains).
+local function listModels()
+	local installed = {}
+	for _, model in ipairs(MODELS) do
+		if LrFileUtils.exists(LrPathUtils.child(LrPathUtils.child(_PLUGIN.path, 'models'), model.name)) then
+			installed[#installed + 1] = model
+		end
+	end
+	return #installed > 0 and installed or MODELS
+end
+
+local function modelTitle(name)
+	for _, model in ipairs(MODELS) do
+		if model.name == name then return model.title end
+	end
+	return name
+end
+
 -- "makeup, hair styling,,backstage" -> { 'makeup', 'hair styling', 'backstage' }
 local function parseHints(text)
 	local hints = {}
@@ -183,7 +208,7 @@ local function parseHints(text)
 	return hints
 end
 
--- Shows the options dialog. Returns { labelSet, hints, onlyHints }, or nil if cancelled.
+-- Shows the options dialog. Returns { model, labelSet, hints, onlyHints }, or nil if cancelled.
 -- The choices are remembered for next time.
 local function askOptions(context, photoCount)
 	local prefs = LrPrefs.prefsForPlugin()
@@ -193,7 +218,12 @@ local function askOptions(context, photoCount)
 		return nil
 	end
 
+	local models = listModels()
 	local props = LrBinding.makePropertyTable(context)
+	props.model = models[1].name
+	for _, model in ipairs(models) do
+		if model.name == prefs.model then props.model = model.name end
+	end
 	props.labelSet = sets[1]
 	for _, name in ipairs(sets) do
 		if name == prefs.labelSet then props.labelSet = name end
@@ -206,10 +236,16 @@ local function askOptions(context, photoCount)
 	local labelWidth = LrView.share 'label_width'
 	local items = {}
 	for _, name in ipairs(sets) do items[#items + 1] = { title = name, value = name } end
+	local modelItems = {}
+	for _, model in ipairs(models) do modelItems[#modelItems + 1] = { title = model.title, value = model.name } end
 
 	local rows = {
 		bind_to_object = props,
 		spacing = f:control_spacing(),
+		f:row {
+			f:static_text { title = 'Model:', alignment = 'right', width = labelWidth },
+			f:popup_menu { items = modelItems, value = bind 'model' },
+		},
 		f:row {
 			f:static_text { title = 'Label set:', alignment = 'right', width = labelWidth },
 			f:popup_menu { items = items, value = bind 'labelSet', enabled = LrBinding.negativeOfKey 'onlyHints' },
@@ -241,8 +277,8 @@ local function askOptions(context, photoCount)
 	if result ~= 'ok' then return nil end
 
 	-- Saved before checking, so a rejected entry is still there to fix next time.
-	prefs.labelSet, prefs.hints, prefs.onlyHints = props.labelSet, props.hints, props.onlyHints
-	local options = { labelSet = props.labelSet, hints = parseHints(props.hints), onlyHints = props.onlyHints }
+	prefs.model, prefs.labelSet, prefs.hints, prefs.onlyHints = props.model, props.labelSet, props.hints, props.onlyHints
+	local options = { model = props.model, labelSet = props.labelSet, hints = parseHints(props.hints), onlyHints = props.onlyHints }
 	if options.onlyHints and #options.hints == 0 then
 		LrDialogs.message('Classify Photos', 'Enter at least one hint, or untick "Use only the hints".', 'warning')
 		return nil
@@ -259,10 +295,10 @@ local function askOptions(context, photoCount)
 	return options
 end
 
--- Builds the --labels options for the chosen set and hints. Hints go in a temp file (deleted
--- when `context` ends) so they never pass through the command line.
-local function labelArguments(context, options)
-	local args = { '--top ' .. TOP_LABELS }
+-- Builds klassifier.exe's options for the chosen model, set and hints. Hints go in a temp file
+-- (deleted when `context` ends) so they never pass through the command line.
+local function appArguments(context, options)
+	local args = { '--top ' .. TOP_LABELS, '--model ' .. options.model }
 	if not options.onlyHints then
 		local setFile = LrPathUtils.child(LrPathUtils.child(_PLUGIN.path, LABEL_SET_DIR), options.labelSet .. '.txt')
 		args[#args + 1] = string.format('--labels "%s"', setFile)
@@ -341,7 +377,7 @@ end
 -- Runs klassifier.exe on `paths` in chunks, with a progress bar. Returns a list of
 -- { path, fields } in `paths` order, the backend name and whether the user cancelled.
 -- Returns nil if a run fails (after showing why).
-local function classifyAll(context, paths, labelArgs)
+local function classifyAll(context, paths, appArgs)
 	local progress = LrProgressScope { title = 'Classifying photos', functionContext = context }
 	local results, cancelled, backend = {}, false, nil
 	for first = 1, #paths, CHUNK_SIZE do
@@ -354,7 +390,7 @@ local function classifyAll(context, paths, labelArgs)
 
 		local chunk = {}
 		for i = first, last do chunk[#chunk + 1] = paths[i] end
-		local rows, chunkBackend = processChunk(chunk, labelArgs)
+		local rows, chunkBackend = processChunk(chunk, appArgs)
 		if not rows then
 			local err = chunkBackend
 			progress:done()
@@ -428,9 +464,9 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	end
 	local options = askOptions(context, #paths)
 	if not options then return end
-	local labelArgs = labelArguments(context, options)
+	local appArgs = appArguments(context, options)
 
-	local results, backend, cancelled = classifyAll(context, paths, labelArgs)
+	local results, backend, cancelled = classifyAll(context, paths, appArgs)
 	if not results then return end
 
 	local counts = { loaded = 0, small = 0, failed = 0, unsupported = 0, strong = 0, good = 0, weak = 0 }
@@ -442,11 +478,12 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	local summary = string.format(
 		'%d classified: %d strong, %d good, %d weak matches (%d with small previews).\n' ..
 		'%d failed, %d unsupported. Skipped %d video(s), %d duplicate(s). Ran on %s.\n' ..
-		'Labels: %s.\n\n' ..
+		'Model: %s. Labels: %s.\n\n' ..
 		'Percentages are each label\'s share of the photo\'s total score. The match level\n' ..
 		'says how sure the model is about the top label.',
 		counts.loaded, counts.strong, counts.good, counts.weak, counts.small,
-		counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown', describeLabels(options))
+		counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown',
+		modelTitle(options.model), describeLabels(options))
 	if cancelled then
 		summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 	end
@@ -457,8 +494,8 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 		return
 	end
 
-	local notes = string.format('Labels: %s. %d failed, %d unsupported. Skipped %d video(s), %d duplicate(s).',
-		describeLabels(options), counts.failed, counts.unsupported, videos, duplicates)
+	local notes = string.format('Model: %s. Labels: %s.\n%d failed, %d unsupported. Skipped %d video(s), %d duplicate(s).',
+		modelTitle(options.model), describeLabels(options), counts.failed, counts.unsupported, videos, duplicates)
 	if cancelled then
 		notes = notes .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 	end
