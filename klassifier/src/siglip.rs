@@ -1,6 +1,6 @@
-//! Zero-shot image classifier using SigLIP (google/siglip-base-patch16-224, ONNX export by
-//! Xenova). Each label gets an independent score from 0 to 1, so several labels can match one
-//! image. Runs on the GPU through DirectML when available, otherwise on the CPU. With more
+//! Zero-shot image classifier using SigLIP or SigLIP 2 (one of `MODELS`, ONNX exports from
+//! Hugging Face). Each label gets an independent score from 0 to 1, so several labels can match
+//! one image. Runs on the GPU through DirectML when available, otherwise on the CPU. With more
 //! than one GPU (a desktop CPU's integrated graphics and a graphics card, say), DirectML is
 //! asked for the one Windows ranks as high-performance.
 //!
@@ -16,29 +16,107 @@ use image::imageops::FilterType;
 use image::DynamicImage;
 use ndarray::{Array2, Array4, ArrayView1, Ix2};
 use ort::ep;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 
-/// Model input size (preprocessor_config.json).
-pub const IMAGE_SIZE: u32 = 224;
-/// SigLIP's text encoder expects exactly 64 tokens, padded with `</s>` (id 1).
+/// A model the app can run: a folder under `models/` named `name`, laid out by `make fetch`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModelSpec {
+    /// The `--model` value and the folder name.
+    pub name: &'static str,
+    /// Input size (preprocessor_config.json `size`). Smaller previews are flagged `small`.
+    pub image_size: u32,
+    /// Resize filter (preprocessor_config.json `resample`: 3 = bicubic, 2 = bilinear).
+    filter: FilterType,
+    /// The text padding token (tokenizer.json `padding`).
+    pad_id: u32,
+    pad_token: &'static str,
+    /// exp(logit_scale) and logit_bias, read from the original (Google) weights.
+    logit_scale: f32,
+    logit_bias: f32,
+    /// Match levels by the best raw score in a photo (see `MatchLevel`). `good_match` is also
+    /// the default cutoff for suggesting a label (see `suggested`).
+    strong_match: f32,
+    good_match: f32,
+}
+
+/// The models, smallest first. The first is the default.
+pub const MODELS: &[ModelSpec] = &[
+    // google/siglip-base-patch16-224 (ONNX export by Xenova).
+    ModelSpec {
+        name: "siglip-base-224",
+        image_size: 224,
+        filter: FilterType::CatmullRom,
+        pad_id: 1,
+        pad_token: "</s>",
+        logit_scale: 117.330_77,
+        logit_bias: -12.932_437,
+        strong_match: 0.10,
+        good_match: 0.01,
+    },
+    // google/siglip2-so400m-patch16-384 (ONNX export by onnx-community), fp16 weights.
+    ModelSpec {
+        name: "siglip2-so400m-fp16",
+        image_size: 384,
+        filter: FilterType::Triangle,
+        pad_id: 0,
+        pad_token: "<pad>",
+        logit_scale: 109.855_02,
+        logit_bias: -15.932_409,
+        // SigLIP 2's raw scores run about 10x lower than SigLIP's on the same photos.
+        // Provisional: set so it rates about as many test photos good or strong.
+        strong_match: 0.01,
+        good_match: 0.001,
+    },
+    // The same model with fp32 weights.
+    ModelSpec {
+        name: "siglip2-so400m-fp32",
+        image_size: 384,
+        filter: FilterType::Triangle,
+        pad_id: 0,
+        pad_token: "<pad>",
+        logit_scale: 109.855_02,
+        logit_bias: -15.932_409,
+        // SigLIP 2's raw scores run about 10x lower than SigLIP's on the same photos.
+        // Provisional: set so it rates about as many test photos good or strong.
+        strong_match: 0.01,
+        good_match: 0.001,
+    },
+];
+
+/// The model named `name` (a `ModelSpec::name`), if there is one.
+pub fn model(name: &str) -> Option<&'static ModelSpec> {
+    MODELS.iter().find(|m| m.name == name)
+}
+
+impl ModelSpec {
+    /// The default raw-score cutoff for suggesting a label as a keyword.
+    pub fn suggest_min(&self) -> f32 {
+        self.good_match
+    }
+
+    /// How much to trust a photo's labels, from its best raw score.
+    pub fn match_level(&self, best_score: f32) -> MatchLevel {
+        if best_score >= self.strong_match {
+            MatchLevel::Strong
+        } else if best_score >= self.good_match {
+            MatchLevel::Good
+        } else {
+            MatchLevel::Weak
+        }
+    }
+}
+
+/// SigLIP's text encoders expect exactly 64 tokens, padded (`ModelSpec::pad_id`).
 const TEXT_TOKENS: usize = 64;
-const PAD_ID: u32 = 1;
-const PAD_TOKEN: &str = "</s>";
-/// exp(logit_scale) and logit_bias, read from google/siglip-base-patch16-224's weights.
-const LOGIT_SCALE: f32 = 117.330_77;
-const LOGIT_BIAS: f32 = -12.932_437;
 const TEXT_BATCH: usize = 32;
-/// Previews over `PRESHRINK_ABOVE` are shrunk quickly to `PRESHRINK_EDGE` before the final
-/// resize (see `preprocess`). Only reductions of 2x or more, where area averaging is accurate.
-const PRESHRINK_ABOVE: u32 = 8 * IMAGE_SIZE;
-const PRESHRINK_EDGE: u32 = 4 * IMAGE_SIZE;
-/// Match levels by the best raw score in a photo (see `MatchLevel`).
-const STRONG_MATCH: f32 = 0.10;
-const GOOD_MATCH: f32 = 0.01;
-/// Default raw-score cutoff for suggesting a label as a keyword (see `suggested`).
-pub const SUGGEST_MIN: f32 = GOOD_MATCH;
+/// Previews over `PRESHRINK_ABOVE` times the model's input size are shrunk quickly to
+/// `PRESHRINK_EDGE` times it before the final resize (see `preprocess`). Only reductions of 2x
+/// or more, where area averaging is accurate.
+const PRESHRINK_ABOVE: u32 = 8;
+const PRESHRINK_EDGE: u32 = 4;
 /// Most keywords suggested per photo.
 pub const SUGGEST_MAX: usize = 5;
 /// Bump when anything that affects cached label embeddings changes (prompt, tokenizing, ...).
@@ -101,16 +179,16 @@ pub fn init_runtime(dir: &Path) -> Result<()> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabelScore {
     pub label: String,
-    /// SigLIP's own score: the chance this label applies, judged on its own. Low in absolute
-    /// terms (a clear match is often 0.05-0.3), but comparable across photos, so it's what a
-    /// keyword cutoff should use.
+    /// The model's own score: the chance this label applies, judged on its own. Low in
+    /// absolute terms (a clear match is often 0.05-0.3 with SigLIP, 0.001-0.05 with SigLIP 2),
+    /// but comparable across one model's photos, so it's what a keyword cutoff should use.
     pub score: f32,
     /// This label's share of all labels for the photo (softmax of the logits; all labels sum to
     /// 1). Easier to read, but some label always gets a large share, even if nothing matches.
     pub share: f32,
 }
 
-/// How much to trust a photo's labels, from its best raw score.
+/// How much to trust a photo's labels, from its best raw score (`ModelSpec::match_level`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchLevel {
     Strong,
@@ -119,16 +197,6 @@ pub enum MatchLevel {
 }
 
 impl MatchLevel {
-    pub fn from_best_score(score: f32) -> Self {
-        if score >= STRONG_MATCH {
-            MatchLevel::Strong
-        } else if score >= GOOD_MATCH {
-            MatchLevel::Good
-        } else {
-            MatchLevel::Weak
-        }
-    }
-
     pub fn as_str(self) -> &'static str {
         match self {
             MatchLevel::Strong => "strong",
@@ -139,6 +207,7 @@ impl MatchLevel {
 }
 
 pub struct Classifier {
+    model: &'static ModelSpec,
     vision: Session,
     backend: Backend,
     gpu_name: Option<String>,
@@ -149,17 +218,24 @@ pub struct Classifier {
 }
 
 impl Classifier {
-    /// Loads the vision model and the label embeddings (from `cache_dir` when possible).
-    pub fn new(files: &ModelFiles, labels: Vec<String>, cache_dir: &Path, use_gpu: bool) -> Result<Self> {
+    /// Loads `model`'s vision model (from `files`) and the label embeddings (from `cache_dir`
+    /// when possible).
+    pub fn new(
+        model: &'static ModelSpec,
+        files: &ModelFiles,
+        labels: Vec<String>,
+        cache_dir: &Path,
+        use_gpu: bool,
+    ) -> Result<Self> {
         ensure!(!labels.is_empty(), "no labels to classify with");
         let (vision, backend) = open_session(&files.vision, use_gpu)?;
         check_io(&vision, "pixel_values")?;
 
-        let cache = cache_dir.join(format!("klassifier-siglip-{:016x}.bin", cache_key(files, &labels)?));
+        let cache = cache_dir.join(format!("klassifier-siglip-{:016x}.bin", cache_key(model, files, &labels)?));
         let (label_embeddings, labels_from_cache) = match read_cache(&cache, labels.len()) {
             Some(embeddings) => (embeddings, true),
             None => {
-                let embeddings = embed_labels(files, &labels, use_gpu)?;
+                let embeddings = embed_labels(model, files, &labels, use_gpu)?;
                 if let Err(e) = write_cache(&cache, &embeddings) {
                     eprintln!("warning: cannot write {}: {e:#}", cache.display());
                 }
@@ -167,7 +243,7 @@ impl Classifier {
             }
         };
         let gpu_name = if backend == Backend::DirectML { high_performance_gpu_name() } else { None };
-        Ok(Classifier { vision, backend, gpu_name, labels, label_embeddings, labels_from_cache })
+        Ok(Classifier { model, vision, backend, gpu_name, labels, label_embeddings, labels_from_cache })
     }
 
     pub fn backend(&self) -> Backend {
@@ -189,7 +265,7 @@ impl Classifier {
 
     /// Scores every label for `image` and returns the `top` best, highest first.
     pub fn classify(&mut self, image: &DynamicImage, top: usize) -> Result<Vec<LabelScore>> {
-        let pixels = preprocess(image);
+        let pixels = preprocess(image, self.model);
         let outputs = self
             .vision
             .run(ort::inputs!["pixel_values" => TensorRef::from_array_view(pixels.view()).map_err(ort_error)?])
@@ -201,7 +277,7 @@ impl Classifier {
         let embedding = normalized(embedding.row(0));
 
         let logits: Vec<f32> =
-            self.label_embeddings.dot(&embedding).iter().map(|&cos| LOGIT_SCALE * cos + LOGIT_BIAS).collect();
+            self.label_embeddings.dot(&embedding).iter().map(|&cos| self.model.logit_scale * cos + self.model.logit_bias).collect();
         Ok(rank(&self.labels, &logits, top))
     }
 }
@@ -303,19 +379,21 @@ pub fn prompt(label: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Resizes straight to 224x224 (no crop) with a bicubic filter, scales to [-1, 1], NCHW.
-pub fn preprocess(image: &DynamicImage) -> Array4<f32> {
-    let size = IMAGE_SIZE as usize;
+/// Resizes straight to the model's input size (no crop) with its filter, scales to [-1, 1],
+/// NCHW.
+pub fn preprocess(image: &DynamicImage, model: &ModelSpec) -> Array4<f32> {
+    let edge = model.image_size;
+    let size = edge as usize;
     // A bicubic resize costs time in proportion to the source size, so shrink large previews
     // (an 18 MP CR2 preview, say) with a fast area average first: about 5x faster.
     let shrunk;
-    let image = if image.width().max(image.height()) > PRESHRINK_ABOVE {
-        shrunk = image.thumbnail(PRESHRINK_EDGE, PRESHRINK_EDGE);
+    let image = if image.width().max(image.height()) > PRESHRINK_ABOVE * edge {
+        shrunk = image.thumbnail(PRESHRINK_EDGE * edge, PRESHRINK_EDGE * edge);
         &shrunk
     } else {
         image
     };
-    let rgb = image.resize_exact(IMAGE_SIZE, IMAGE_SIZE, FilterType::CatmullRom).to_rgb8();
+    let rgb = image.resize_exact(edge, edge, model.filter).to_rgb8();
     let mut pixels = Array4::<f32>::zeros((1, 3, size, size));
     for (x, y, pixel) in rgb.enumerate_pixels() {
         for c in 0..3 {
@@ -325,13 +403,13 @@ pub fn preprocess(image: &DynamicImage) -> Array4<f32> {
     pixels
 }
 
-fn embed_labels(files: &ModelFiles, labels: &[String], use_gpu: bool) -> Result<Array2<f32>> {
+fn embed_labels(model: &ModelSpec, files: &ModelFiles, labels: &[String], use_gpu: bool) -> Result<Array2<f32>> {
     let mut tokenizer = Tokenizer::from_file(&files.tokenizer)
         .map_err(|e| anyhow!("cannot load {}: {e}", files.tokenizer.display()))?;
     tokenizer.with_padding(Some(PaddingParams {
         strategy: PaddingStrategy::Fixed(TEXT_TOKENS),
-        pad_id: PAD_ID,
-        pad_token: PAD_TOKEN.into(),
+        pad_id: model.pad_id,
+        pad_token: model.pad_token.into(),
         ..Default::default()
     }));
     tokenizer
@@ -391,6 +469,12 @@ fn build_session(model: &Path, gpu: bool) -> Result<Session> {
                 .error_on_failure()])
             .map_err(ort_error)?;
     }
+    if !gpu {
+        // The CPU's default level (all optimizations) breaks the fp16 SigLIP 2 model ("name which
+        // does not exist: InsertedPrecisionFreeCast_..."). Level 3 loads it and is as fast for
+        // the fp32 models.
+        builder = builder.with_optimization_level(GraphOptimizationLevel::Level3).map_err(ort_error)?;
+    }
     builder.commit_from_file(model).map_err(ort_error)
 }
 
@@ -447,7 +531,7 @@ const CACHE_MAGIC: &[u8; 4] = b"HSL1";
 
 /// FNV-1a over everything the label embeddings depend on. (Stable across builds, unlike
 /// `DefaultHasher`.)
-fn cache_key(files: &ModelFiles, labels: &[String]) -> Result<u64> {
+fn cache_key(model: &ModelSpec, files: &ModelFiles, labels: &[String]) -> Result<u64> {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut feed = |bytes: &[u8]| {
         for &b in bytes {
@@ -455,6 +539,8 @@ fn cache_key(files: &ModelFiles, labels: &[String]) -> Result<u64> {
         }
     };
     feed(&CACHE_VERSION.to_le_bytes());
+    feed(model.name.as_bytes());
+    feed(b"\n");
     for path in [&files.text, &files.tokenizer] {
         let len = fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?.len();
         feed(&len.to_le_bytes());
@@ -510,9 +596,20 @@ mod tests {
 
     #[test]
     fn match_levels_follow_best_score() {
-        assert_eq!(MatchLevel::from_best_score(0.12), MatchLevel::Strong);
-        assert_eq!(MatchLevel::from_best_score(0.03), MatchLevel::Good);
-        assert_eq!(MatchLevel::from_best_score(0.004), MatchLevel::Weak);
+        let light = &MODELS[0];
+        assert_eq!(light.match_level(0.12), MatchLevel::Strong);
+        assert_eq!(light.match_level(0.03), MatchLevel::Good);
+        assert_eq!(light.match_level(0.004), MatchLevel::Weak);
+    }
+
+    #[test]
+    fn models_are_found_by_name() {
+        assert_eq!(model("siglip-base-224"), Some(&MODELS[0]));
+        assert_eq!(model("siglip2-so400m-fp32").map(|m| m.image_size), Some(384));
+        assert_eq!(model("nope"), None);
+        for m in MODELS {
+            assert!(m.strong_match > m.good_match, "{}", m.name);
+        }
     }
 
     fn scores(values: &[f32]) -> Vec<LabelScore> {
@@ -531,8 +628,8 @@ mod tests {
     #[test]
     fn suggested_is_capped_at_max() {
         let ranked = scores(&[0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3]);
-        assert_eq!(suggested(&ranked, SUGGEST_MIN, SUGGEST_MAX).len(), SUGGEST_MAX);
-        assert_eq!(suggested(&ranked, SUGGEST_MIN, 2), &ranked[..2]);
+        assert_eq!(suggested(&ranked, 0.01, SUGGEST_MAX).len(), SUGGEST_MAX);
+        assert_eq!(suggested(&ranked, 0.01, 2), &ranked[..2]);
     }
 
     #[test]
@@ -573,7 +670,10 @@ mod tests {
         fs::write(dir.join("text_model.onnx"), "t").unwrap();
         fs::write(dir.join("tokenizer.json"), "tok").unwrap();
         let files = ModelFiles::in_dir(&dir);
-        assert_eq!(cache_key(&files, &mapped.labels).unwrap(), cache_key(&files, &plain.labels).unwrap());
+        let light = &MODELS[0];
+        assert_eq!(cache_key(light, &files, &mapped.labels).unwrap(), cache_key(light, &files, &plain.labels).unwrap());
+        // Another model's embeddings never come from this one's cache, even with the same files.
+        assert_ne!(cache_key(&MODELS[1], &files, &plain.labels).unwrap(), cache_key(light, &files, &plain.labels).unwrap());
 
         assert!(plain.keywords.is_empty());
         assert_eq!(mapped.keywords["bird"], ["Wildlife", "Bird"]);
@@ -616,9 +716,12 @@ mod tests {
     #[test]
     fn preprocess_scales_to_minus_one_one() {
         let white = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(500, 300, image::Rgb([255, 255, 255])));
-        let pixels = preprocess(&white);
-        assert_eq!(pixels.shape(), &[1, 3, 224, 224]);
-        assert!(pixels.iter().all(|&v| (v - 1.0).abs() < 1e-6));
+        for m in MODELS {
+            let pixels = preprocess(&white, m);
+            let size = m.image_size as usize;
+            assert_eq!(pixels.shape(), &[1, 3, size, size]);
+            assert!(pixels.iter().all(|&v| (v - 1.0).abs() < 1e-6), "{}", m.name);
+        }
     }
 
     #[test]

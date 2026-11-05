@@ -4,13 +4,14 @@ A Lightroom Classic plug-in that adds a "Classify Photos" command under
 **File > Plug-in Extras** and **Library > Plug-in Extras**. It runs a small
 Windows console app (`klassifier.exe`, written in Rust) on the targeted photos.
 The app scores each photo against a list of labels ("dog", "beach",
-"sunset", ...) with the [SigLIP](https://huggingface.co/google/siglip-base-patch16-224)
-image model, and the plugin shows the suggested keywords for each photo in a
+"sunset", ...) with a SigLIP image model (see [Models](#models)), and the
+plugin shows the suggested keywords for each photo in a
 review window. You can accept them all at once, or adjust a photo's keywords
 first, and the plugin adds them to the photos in the catalog.
 
 The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
-to the CPU. This small model is only slightly slower on the CPU. On a PC with
+to the CPU. The light model is only slightly slower on the CPU; the others are
+5-7 times slower there. On a PC with
 more than one GPU (say a desktop CPU's integrated graphics and a graphics
 card), it uses the one Windows ranks as high-performance, normally the
 graphics card. The report's summary names it ("Ran on DirectML (NVIDIA GeForce
@@ -36,15 +37,17 @@ rustup target add x86_64-pc-windows-gnu
 sudo apt update && sudo apt install -y gcc-mingw-w64-x86-64
 ```
 
-Download the runtime files, about 830 MB, into `vendor/` (gitignored):
+Download the runtime files, about 7.6 GB, into `vendor/` (gitignored):
 
 ```bash
 make fetch
 ```
 
-This gets ONNX Runtime 1.24.4 and DirectML 1.15.4 from NuGet, and the SigLIP
-model (`Xenova/siglip-base-patch16-224`, ONNX export) from Hugging Face.
-`make deploy` runs it too, and it skips files that are already downloaded.
+This gets ONNX Runtime 1.24.4 and DirectML 1.15.4 from NuGet, and the three
+models' ONNX exports from Hugging Face: `Xenova/siglip-base-patch16-224` and
+`onnx-community/siglip2-so400m-patch16-384-ONNX` (its fp16 and fp32 files).
+Each model goes in its own folder in `vendor/models/`. `make deploy` runs it
+too, and it skips files that are already downloaded.
 
 Build and deploy:
 
@@ -55,7 +58,7 @@ make deploy
 Or press **Ctrl+Shift+B** in VS Code. This cross-compiles `klassifier.exe` and
 copies the plugin folder, the exe and the runtime files to
 `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`. Only changed files are
-copied, so the model is copied once. To deploy somewhere else:
+copied, so the models are copied once. To deploy somewhere else:
 
 ```bash
 make deploy DEPLOY_DIR=/mnt/c/somewhere
@@ -153,24 +156,54 @@ IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
 ```
 
 - **SMALL PREVIEW** after the heading means the image the app read is
-  under 224 px on its long edge, the size the model works at, so the labels
-  are less reliable. The summary at the top counts these.
+  smaller on its long edge than the size the model works at (224 px for the
+  light model, 384 px for the others), so the labels are less reliable. The
+  summary at the top counts these.
 - The percentages are each label's share of the photo's total score across
   all labels. They show how the labels compare for this photo.
 - Shares always add up to 100%, so some label gets a big share even when
   nothing fits. The match level shows how sure the model is about the top
-  label, from its raw score:
-  - **strong:** raw score of 10% or more
-  - **good:** 1% to 10%
-  - **weak:** under 1%, so treat the labels as guesses
+  label, from its raw score. The levels depend on the model, because SigLIP 2
+  gives raw scores about 10 times lower than SigLIP on the same photos:
 
-The raw score is SigLIP's own estimate that a label applies, judged on its
-own. It's low even for clear matches (often 5-30%). It's in the app's output
-and is what the keyword cutoff uses, since it means the same thing in every
-photo.
+  | Level | Light | Medium and High |
+  |---|---|---|
+  | **strong** | 10% or more | 1% or more |
+  | **good** | 1% to 10% | 0.1% to 1% |
+  | **weak**: treat the labels as guesses | under 1% | under 0.1% |
 
-- **Suggested** keywords are the top labels with a raw score of at least 1%,
-  at most 5 per photo. A weak match suggests none.
+  The Medium and High levels are provisional, set from 10 test photos so
+  about as many photos rate good or strong as with Light.
+
+The raw score is the model's own estimate that a label applies, judged on its
+own. It's low even for clear matches (often 5-30% with Light, 0.1-5% with
+Medium and High). It's in the app's output and is what the keyword cutoff
+uses, since it means the same thing in every photo.
+
+- **Suggested** keywords are the top labels with a raw score of at least the
+  model's "good" level (1% for Light, 0.1% for Medium and High), at most 5
+  per photo. A weak match suggests none.
+
+### Models
+
+| | Light | Medium | High |
+|---|---|---|---|
+| Model | [SigLIP](https://huggingface.co/google/siglip-base-patch16-224) base, 224 px | [SigLIP 2](https://huggingface.co/google/siglip2-so400m-patch16-384) So400m, 384 px, fp16 | the same, fp32 |
+| `--model` | `siglip-base-224` | `siglip2-so400m-fp16` | `siglip2-so400m-fp32` |
+| Download | 0.8 GB | 2.3 GB | 4.5 GB |
+| Per photo, GPU (with reading the file) | ~90 ms | ~110 ms | ~120 ms |
+| Loading, per batch of 100 | 0.5 s | 0.8 s | 1.1 s |
+| New labels, first time | 1-2 s | 3 s | 4 s |
+| Per photo, CPU | ~130 ms | ~700 ms | ~550 ms |
+
+Timings are from an RTX 4090 and a Ryzen 9 7950X, on the 10 test photos.
+Medium and High are the same model at different precision. Their labels and
+scores came out the same on the test photos (within 0.01 points), so Medium
+should be enough; High is there to check that on more photos.
+
+The models score differently, so a label set tuned on one may need a look on
+another, and the match levels differ (see [Reading the report](#reading-the-report-details)).
+Each model caches its own label embeddings.
 
 ### Labels, label sets and hints
 
@@ -274,8 +307,12 @@ klassifier.exe [options] [paths...]
 - `--list <file>` reads photo paths from a UTF-8 file, one per line.
 - `--top <n>` reports the `n` best labels per photo (default 5).
 - `--min-score <x>` suggests labels with a raw score of at least `x`, from 0
-  to 1 (default 0.01). At most 5 are suggested, and only from the `--top`
+  to 1 (default: the model's "good" level, 0.01 for `siglip-base-224` and
+  0.001 for the others). At most 5 are suggested, and only from the `--top`
   labels.
+- `--model <name>` picks the model: `siglip-base-224` (Light, the default),
+  `siglip2-so400m-fp16` (Medium) or `siglip2-so400m-fp32` (High). It's the
+  name of the model's folder in `models/` next to the exe.
 - `--labels <file>` scores against the labels in `<file>`. Repeat it to
   merge several files; a label in more than one is kept once. The default is
   `label-sets/General.txt` next to the exe.
@@ -288,8 +325,8 @@ The output is tab-separated, one line per photo (format documented in
 `klassifier/src/output.rs`):
 
 ```
-#klassifier	2.1.0	backend=DirectML	gpu=NVIDIA GeForce RTX 4090
-#model	load_ms=520	labels=98	label_cache=hit
+#klassifier	2.2.0	backend=DirectML	gpu=NVIDIA GeForce RTX 4090
+#model	name=siglip-base-224	load_ms=520	labels=98	label_cache=hit
 OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		Forest=0.1589;Tree=0.1422;Landscape=0.0235;River=0.0147;Lake=0.0074	Forest=0.4512;Tree=0.3628;Landscape=0.0681;River=0.0418;Lake=0.0306	strong	Forest;Tree;Landscape;River	
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
 #summary	ok=1	err=1	ms=40

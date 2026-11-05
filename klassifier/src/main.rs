@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
-use klassifier::siglip::{self, Classifier, ModelFiles};
+use klassifier::siglip::{self, Classifier, ModelFiles, ModelSpec};
 use klassifier::{output, preview};
 
 const USAGE: &str = "\
@@ -19,9 +19,12 @@ Usage: klassifier [options] [paths...]
 
   --list <file>    Read photo paths from <file>, one per line (UTF-8)
   --top <n>        Report the <n> best-scoring labels per photo (default 5)
-  --min-score <x>  Suggest labels with a raw score of at least <x>, 0 to 1 (default 0.01)
+  --min-score <x>  Suggest labels with a raw score of at least <x>, 0 to 1
+                   (default: the model's good-match level)
   --labels <file>  Labels to score against; repeat to merge several files
                    (default: label-sets/General.txt next to the exe)
+  --model <name>   siglip-base-224 (default), siglip2-so400m-fp16 or siglip2-so400m-fp32:
+                   the folder in models/ next to the exe
   --cpu            Don't use the GPU
   --no-classify    Only read the previews; needs no model files
   --dump <dir>     Save each loaded image, at most 1024 px, as <dir>/<file name>.jpg";
@@ -35,7 +38,9 @@ struct Args {
     dump: Option<PathBuf>,
     top: usize,
     labels: Vec<PathBuf>,
-    min_score: f32,
+    model: &'static ModelSpec,
+    /// `None`: the model's default (`ModelSpec::suggest_min`).
+    min_score: Option<f32>,
     classify: bool,
     use_gpu: bool,
 }
@@ -68,7 +73,8 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
         dump: None,
         top: DEFAULT_TOP,
         labels: Vec::new(),
-        min_score: siglip::SUGGEST_MIN,
+        model: &siglip::MODELS[0],
+        min_score: None,
         classify: true,
         use_gpu: true,
     };
@@ -89,6 +95,14 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
                 );
             }
             Some("--dump") => args.dump = Some(PathBuf::from(it.next().context("--dump needs a directory")?)),
+            Some("--model") => {
+                let name = it.next().context("--model needs a name")?;
+                let name = name.to_string_lossy();
+                args.model = siglip::model(&name).with_context(|| {
+                    let names: Vec<&str> = siglip::MODELS.iter().map(|m| m.name).collect();
+                    format!("unknown model {name} (expected one of {})", names.join(", "))
+                })?;
+            }
             Some("--labels") => args.labels.push(PathBuf::from(it.next().context("--labels needs a file")?)),
             Some("--top") => {
                 let n = it.next().context("--top needs a number")?;
@@ -100,11 +114,12 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
             }
             Some("--min-score") => {
                 let x = it.next().context("--min-score needs a number from 0 to 1")?;
-                args.min_score = x
-                    .to_str()
-                    .and_then(|s| s.parse().ok())
-                    .filter(|x: &f32| (0.0..=1.0).contains(x))
-                    .context("--min-score needs a number from 0 to 1")?;
+                args.min_score = Some(
+                    x.to_str()
+                        .and_then(|s| s.parse().ok())
+                        .filter(|x: &f32| (0.0..=1.0).contains(x))
+                        .context("--min-score needs a number from 0 to 1")?,
+                );
             }
             Some("--cpu") => args.use_gpu = false,
             Some("--no-classify") => args.classify = false,
@@ -131,8 +146,8 @@ fn load_classifier(args: &Args) -> Result<(Classifier, HashMap<String, Vec<Strin
     };
     let set = siglip::read_labels(&label_files)?;
     siglip::init_runtime(dir)?;
-    let files = ModelFiles::in_dir(&dir.join("models").join("siglip"));
-    let classifier = Classifier::new(&files, set.labels, &std::env::temp_dir(), args.use_gpu)?;
+    let files = ModelFiles::in_dir(&dir.join("models").join(args.model.name));
+    let classifier = Classifier::new(args.model, &files, set.labels, &std::env::temp_dir(), args.use_gpu)?;
     Ok((classifier, set.keywords, started.elapsed().as_millis()))
 }
 
@@ -148,12 +163,13 @@ fn run(args: &Args) -> Result<()> {
         let (c, k, load_ms) = load_classifier(args)?;
         keywords = k;
         writeln!(out, "{}", output::header(Some(c.backend().as_str()), c.gpu_name()))?;
-        writeln!(out, "{}", output::model_line(load_ms, c.label_count(), c.labels_from_cache()))?;
+        writeln!(out, "{}", output::model_line(args.model, load_ms, c.label_count(), c.labels_from_cache()))?;
         classifier = Some(c);
     } else {
         writeln!(out, "{}", output::header(None, None))?;
     }
 
+    let min_score = args.min_score.unwrap_or(args.model.suggest_min());
     let started = Instant::now();
     let (mut ok, mut err) = (0, 0);
     for path in &args.paths {
@@ -169,7 +185,7 @@ fn run(args: &Args) -> Result<()> {
         match result {
             Ok((loaded, labels)) => {
                 let ms = t.elapsed().as_millis();
-                writeln!(out, "{}", output::ok_row(&shown, &loaded, ms, labels.as_deref(), args.min_score, &keywords))?;
+                writeln!(out, "{}", output::ok_row(&shown, &loaded, args.model, ms, labels.as_deref(), min_score, &keywords))?;
                 ok += 1;
                 if let Some(dir) = &args.dump {
                     if let Err(e) = dump(dir, path, &loaded.image) {
