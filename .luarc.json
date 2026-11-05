@@ -1,3 +1,9 @@
 {
-  "diagnostics.globals": ["import", "WIN_ENV", "MAC_ENV", "_PLUGIN"]
+  "diagnostics.globals": [
+    "import",
+    "WIN_ENV",
+    "MAC_ENV",
+    "_PLUGIN"
+  ],
+  "runtime.version": "Lua 5.1"
 }

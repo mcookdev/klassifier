@@ -1,7 +1,8 @@
 --[[----------------------------------------------------------------------------
   HelloWorld.lua
   Asks for a label set and optional hints, runs hello-app.exe on the targeted
-  photos in chunks, and shows the labels it matched for each one.
+  photos in chunks, and opens the review window (Review.lua) with the keywords
+  it suggests for each one.
 ------------------------------------------------------------------------------]]
 
 local LrApplication     = import 'LrApplication'
@@ -16,11 +17,15 @@ local LrProgressScope   = import 'LrProgressScope'
 local LrTasks           = import 'LrTasks'
 local LrView            = import 'LrView'
 
+local Review = require 'Review'
+
 local logger = LrLogger('HelloWorld')
 logger:enable('logfile') -- writes to HelloWorld.log in the Lightroom logs folder
 
 -- Photos per hello-app.exe run. Cancel is checked between runs.
 local CHUNK_SIZE = 100
+-- Labels reported per photo: the candidates offered for review.
+local TOP_LABELS = 10
 -- Warn in the options dialog above this many photos (e.g. a whole filmstrip with nothing selected).
 local WARN_ABOVE = 500
 -- Label sets are the .txt files in this folder inside the plugin.
@@ -103,10 +108,16 @@ local function formatShares(field)
 	return #parts > 0 and table.concat(parts, ', ') or '(no labels)'
 end
 
+-- "dog;beach" -> { 'dog', 'beach' }
+local function splitList(field)
+	local items = {}
+	for item in (field or ''):gmatch('[^;]+') do items[#items + 1] = item end
+	return items
+end
+
 -- Suggested keywords "dog;beach" -> "dog, beach"
 local function formatSuggested(field)
-	local labels = {}
-	for label in (field or ''):gmatch('[^;]+') do labels[#labels + 1] = label end
+	local labels = splitList(field)
 	return #labels > 0 and table.concat(labels, ', ') or 'none'
 end
 
@@ -236,7 +247,7 @@ end
 -- Builds the --labels options for the chosen set and hints. Hints go in a temp file (deleted
 -- when `context` ends) so they never pass through the command line.
 local function labelArguments(context, options)
-	local args = {}
+	local args = { '--top ' .. TOP_LABELS }
 	if not options.onlyHints then
 		local setFile = LrPathUtils.child(LrPathUtils.child(_PLUGIN.path, LABEL_SET_DIR), options.labelSet .. '.txt')
 		args[#args + 1] = string.format('--labels "%s"', setFile)
@@ -281,36 +292,31 @@ local function showReport(summary, lines)
 	}
 end
 
-LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
-	LrDialogs.attachErrorDialogToFunctionContext(context)
-
-	local catalog = LrApplication.activeCatalog()
+-- The target photos to classify, one entry per file: { path, photos }. Virtual copies that
+-- share a file with another target photo go in the same entry. Also returns the video count.
+local function collectTargets(catalog)
 	-- getTargetPhotos() returns the selection, or the whole filmstrip if nothing is selected.
 	local photos = catalog:getTargetPhotos()
 	local metadata = catalog:batchGetRawMetadata(photos, { 'path', 'isVideo' })
-
-	-- Skip videos, and virtual copies that share a file with a photo already listed.
-	local paths, seen, videos, duplicates = {}, {}, 0, 0
+	local entries, byPath, videos = {}, {}, 0
 	for _, photo in ipairs(photos) do
 		local m = metadata[photo]
 		if m.isVideo then
 			videos = videos + 1
-		elseif seen[m.path] then
-			duplicates = duplicates + 1
+		elseif byPath[m.path] then
+			table.insert(byPath[m.path].photos, photo)
 		else
-			seen[m.path] = true
-			paths[#paths + 1] = m.path
+			byPath[m.path] = { path = m.path, photos = { photo } }
+			entries[#entries + 1] = byPath[m.path]
 		end
 	end
+	return entries, videos
+end
 
-	if #paths == 0 then
-		LrDialogs.message('Classification report', 'No photos to process.', 'info')
-		return
-	end
-	local options = askOptions(context, #paths)
-	if not options then return end
-	local labelArgs = labelArguments(context, options)
-
+-- Runs hello-app.exe on `paths` in chunks, with a progress bar. Returns a list of
+-- { path, fields } in `paths` order, the backend name and whether the user cancelled.
+-- Returns nil if a run fails (after showing why).
+local function classifyAll(context, paths, labelArgs)
 	local progress = LrProgressScope { title = 'Classifying photos', functionContext = context }
 	local results, cancelled, backend = {}, false, nil
 	for first = 1, #paths, CHUNK_SIZE do
@@ -329,7 +335,7 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 			progress:done()
 			logger:error(err)
 			LrDialogs.message('Classification report', 'Failed to run hello-app.exe:\n' .. err, 'critical')
-			return
+			return nil
 		end
 		backend = chunkBackend or backend
 		for _, path in ipairs(chunk) do
@@ -338,6 +344,53 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 		progress:setPortionComplete(last, #paths)
 	end
 	progress:done()
+	return results, backend, cancelled
+end
+
+-- Review items (see Review.lua) for the photos that classified OK, in `results` order.
+local function buildItems(entries, results)
+	local byPath = {}
+	for _, entry in ipairs(entries) do byPath[entry.path] = entry end
+	local items = {}
+	for _, r in ipairs(results) do
+		local fields = r.fields
+		if fields and fields[1] == 'OK' then
+			-- Field 9 is "label=score;...", best first; field 12 the suggested labels.
+			local candidates, suggested = {}, {}
+			for label in (fields[9] or ''):gmatch('([^;=]+)=[%d.]+') do candidates[#candidates + 1] = label end
+			for _, label in ipairs(splitList(fields[12])) do suggested[label] = true end
+			items[#items + 1] = {
+				path = r.path,
+				name = LrPathUtils.leafName(r.path),
+				photos = byPath[r.path].photos,
+				candidates = candidates,
+				suggested = suggested,
+			}
+		end
+	end
+	return items
+end
+
+LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
+	LrDialogs.attachErrorDialogToFunctionContext(context)
+
+	local entries, videos = collectTargets(LrApplication.activeCatalog())
+	local paths, duplicates = {}, 0
+	for _, entry in ipairs(entries) do
+		paths[#paths + 1] = entry.path
+		duplicates = duplicates + #entry.photos - 1
+	end
+
+	if #paths == 0 then
+		LrDialogs.message('Classification report', 'No photos to process.', 'info')
+		return
+	end
+	local options = askOptions(context, #paths)
+	if not options then return end
+	local labelArgs = labelArguments(context, options)
+
+	local results, backend, cancelled = classifyAll(context, paths, labelArgs)
+	if not results then return end
 
 	local counts = { loaded = 0, small = 0, failed = 0, unsupported = 0, strong = 0, good = 0, weak = 0 }
 	local lines = {}
@@ -356,5 +409,28 @@ LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
 	if cancelled then
 		summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 	end
-	showReport(summary, lines)
+
+	local items = buildItems(entries, results)
+	if #items == 0 then
+		showReport(summary, lines)
+		return
+	end
+
+	local notes = string.format('Labels: %s. %d failed, %d unsupported. Skipped %d video(s), %d duplicate(s).',
+		describeLabels(options), counts.failed, counts.unsupported, videos, duplicates)
+	if cancelled then
+		notes = notes .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
+	end
+	local result = Review.show(context, items, notes, function() showReport(summary, lines) end)
+	if result ~= 'ok' then return end
+
+	-- Pass 2a: a dry run. Writing the keywords comes next.
+	local keywords, photos = Review.totals(items)
+	if keywords == 0 then
+		LrDialogs.message('Review keywords', 'No keywords to add.', 'info')
+	else
+		LrDialogs.message('Review keywords', string.format(
+			'Would add %d keyword(s) to %d photo(s).\n\nPreview only: nothing was written to the catalog.',
+			keywords, photos), 'info')
+	end
 end)

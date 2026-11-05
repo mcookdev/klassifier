@@ -5,8 +5,9 @@ A Lightroom Classic plug-in that adds a "Classify Photos" command under
 Windows console app (`hello-app.exe`, written in Rust) on the targeted photos.
 The app scores each photo against a list of labels ("dog", "beach",
 "sunset", ...) with the [SigLIP](https://huggingface.co/google/siglip-base-patch16-224)
-image model, and the plugin shows the best matches in a dialog. Nothing is
-written to the catalog.
+image model, and the plugin shows the suggested keywords for each photo in a
+review window. Accepting them doesn't write to the catalog yet; it only
+reports what would be added.
 
 The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
 to the CPU. This small model is only slightly slower on the CPU.
@@ -100,16 +101,25 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   Lightroom targets the whole filmstrip, so check the count. Above 500 photos
   the dialog warns that it can take a while.
 - Videos are skipped. Virtual copies that share a file with another targeted
-  photo are processed only once.
+  photo are processed only once, and share its suggestions.
 - Photos go to `hello-app.exe` 100 at a time, with a progress bar. Cancel
   takes effect between batches. A console window may flash for each batch.
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
-- The report dialog lists each photo's match level, its top 5 labels and the
-  keywords it suggests. It also shows the preview size and where it came
-  from, and errors.
+- The **Review keywords** window shows the photos 12 at a time (4x3), each
+  with its file name and how many keywords it suggests ("3 keywords" or "no
+  suggestions"). Use **< Prev** and **Next >** to page through them. The top
+  shows the totals, the label set, and how many files failed, were unsupported
+  or were skipped.
+- **Accept All** (at the top or bottom) is a preview for now: it reports how
+  many keywords would be added to how many photos and writes nothing.
+  **Cancel** closes the window.
+- **Details...** opens the classification report: each photo's match level,
+  its top 10 labels and suggestions, the preview size and where it came from,
+  and errors. If no photo could be classified, the report opens instead of
+  the review window.
 
-### Reading the report
+### Reading the report (Details...)
 
 ```
 IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
@@ -132,8 +142,7 @@ and is what the keyword cutoff uses, since it means the same thing in every
 photo.
 
 - **Suggested** keywords are the top labels with a raw score of at least 1%,
-  at most 5 per photo. A weak match suggests none. Suggestions are only
-  shown for now; nothing is written to the catalog.
+  at most 5 per photo. A weak match suggests none.
 
 ### Labels, label sets and hints
 
