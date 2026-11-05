@@ -1,7 +1,7 @@
 //! Tab-separated output read by the Lightroom plugin.
 //!
 //! ```text
-//! #klassifier<TAB><version>[<TAB>backend=<DirectML|CPU>]
+//! #klassifier<TAB><version>[<TAB>backend=<DirectML|CPU>[<TAB>gpu=<name>]]
 //! #model<TAB>load_ms=<n><TAB>labels=<n><TAB>label_cache=<hit|miss>
 //! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match><TAB><suggested><TAB><keywords>]
 //! ERR<TAB><path><TAB><message>
@@ -9,7 +9,7 @@
 //! ```
 //!
 //! The last five OK fields, the backend and `#model` are only present when classifying (not
-//! with `--no-classify`):
+//! with `--no-classify`). `gpu` is the graphics card's name on DirectML, if Windows gives one.
 //! - `<labels>`: `label=score;label=score;...`, best first, 0.0000-1.0000. SigLIP's own score
 //!   for each label on its own; usually low (a clear match is often 0.05-0.3). Use this for
 //!   cutoffs: it means the same thing in every photo.
@@ -35,10 +35,13 @@ use crate::siglip::{self, LabelScore, MatchLevel};
 /// Images whose long edge is below this are flagged `small`; it is the classifier's input size.
 pub const SMALL_EDGE: u32 = 224;
 
-pub fn header(backend: Option<&str>) -> String {
+pub fn header(backend: Option<&str>, gpu: Option<&str>) -> String {
     let mut line = format!("#klassifier\t{}", env!("CARGO_PKG_VERSION"));
     if let Some(backend) = backend {
         line.push_str(&format!("\tbackend={backend}"));
+        if let Some(gpu) = gpu {
+            line.push_str(&format!("\tgpu={}", clean(gpu)));
+        }
     }
     line
 }
@@ -143,6 +146,17 @@ mod tests {
     #[test]
     fn clean_removes_separators() {
         assert_eq!(clean("a\tb\r\nc"), "a b  c");
+    }
+
+    #[test]
+    fn header_names_the_gpu() {
+        let version = env!("CARGO_PKG_VERSION");
+        assert_eq!(header(None, None), format!("#klassifier\t{version}"));
+        assert_eq!(header(Some("CPU"), None), format!("#klassifier\t{version}\tbackend=CPU"));
+        assert_eq!(
+            header(Some("DirectML"), Some("NVIDIA GeForce RTX 4090")),
+            format!("#klassifier\t{version}\tbackend=DirectML\tgpu=NVIDIA GeForce RTX 4090")
+        );
     }
 
     #[test]

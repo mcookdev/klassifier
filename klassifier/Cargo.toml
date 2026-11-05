@@ -1,6 +1,6 @@
 [package]
 name = "klassifier"
-version = "2.0.1"
+version = "2.1.0"
 edition = "2021"
 
 [dependencies]
@@ -17,3 +17,7 @@ tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-
 
 [profile.release]
 strip = true
+
+# Only to name the GPU DirectML runs on (DXGI), for the report.
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62.2", features = ["Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }

@@ -1,6 +1,8 @@
 //! Zero-shot image classifier using SigLIP (google/siglip-base-patch16-224, ONNX export by
 //! Xenova). Each label gets an independent score from 0 to 1, so several labels can match one
-//! image. Runs on the GPU through DirectML when available, otherwise on the CPU.
+//! image. Runs on the GPU through DirectML when available, otherwise on the CPU. With more
+//! than one GPU (a desktop CPU's integrated graphics and a graphics card, say), DirectML is
+//! asked for the one Windows ranks as high-performance.
 //!
 //! Label embeddings come from the text model, which is only needed when the labels change:
 //! they are cached in a file keyed by the labels and model files.
@@ -139,6 +141,7 @@ impl MatchLevel {
 pub struct Classifier {
     vision: Session,
     backend: Backend,
+    gpu_name: Option<String>,
     labels: Vec<String>,
     /// One L2-normalized row per label.
     label_embeddings: Array2<f32>,
@@ -163,11 +166,17 @@ impl Classifier {
                 (embeddings, false)
             }
         };
-        Ok(Classifier { vision, backend, labels, label_embeddings, labels_from_cache })
+        let gpu_name = if backend == Backend::DirectML { high_performance_gpu_name() } else { None };
+        Ok(Classifier { vision, backend, gpu_name, labels, label_embeddings, labels_from_cache })
     }
 
     pub fn backend(&self) -> Backend {
         self.backend
+    }
+
+    /// The GPU's name when running on DirectML, if Windows reports one.
+    pub fn gpu_name(&self) -> Option<&str> {
+        self.gpu_name.as_deref()
     }
 
     pub fn labels_from_cache(&self) -> bool {
@@ -376,10 +385,36 @@ fn build_session(model: &Path, gpu: bool) -> Result<Session> {
             .map_err(ort_error)?
             .with_parallel_execution(false)
             .map_err(ort_error)?
-            .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
+            .with_execution_providers([ep::DirectML::default()
+                .with_performance_preference(ep::directml::PerformancePreference::HighPerformance)
+                .build()
+                .error_on_failure()])
             .map_err(ort_error)?;
     }
     builder.commit_from_file(model).map_err(ort_error)
+}
+
+/// The name of the GPU Windows ranks first for high performance: the one DirectML picks with
+/// `PerformancePreference::HighPerformance` (it sorts adapters the same way).
+#[cfg(windows)]
+fn high_performance_gpu_name() -> Option<String> {
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory6, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+    };
+    // SAFETY: plain DXGI calls; the COM wrappers release the objects when dropped.
+    let desc = unsafe {
+        let factory: IDXGIFactory6 = CreateDXGIFactory1().ok()?;
+        let adapter: IDXGIAdapter1 = factory.EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE).ok()?;
+        adapter.GetDesc1().ok()?
+    };
+    let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
+    let name = String::from_utf16_lossy(&desc.Description[..len]).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+#[cfg(not(windows))]
+fn high_performance_gpu_name() -> Option<String> {
+    None
 }
 
 /// Fails with a clear message if the model doesn't have the expected input/output names.

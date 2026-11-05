@@ -147,11 +147,11 @@ fn run(args: &Args) -> Result<()> {
     if args.classify {
         let (c, k, load_ms) = load_classifier(args)?;
         keywords = k;
-        writeln!(out, "{}", output::header(Some(c.backend().as_str())))?;
+        writeln!(out, "{}", output::header(Some(c.backend().as_str()), c.gpu_name()))?;
         writeln!(out, "{}", output::model_line(load_ms, c.label_count(), c.labels_from_cache()))?;
         classifier = Some(c);
     } else {
-        writeln!(out, "{}", output::header(None))?;
+        writeln!(out, "{}", output::header(None, None))?;
     }
 
     let started = Instant::now();

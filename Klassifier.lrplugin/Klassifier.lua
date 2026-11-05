@@ -71,7 +71,8 @@ local function splitTabs(line)
 end
 
 -- Runs the app on one chunk of paths. `labelArgs` are the --labels options. Returns a table
--- of path -> row fields plus the backend name (DirectML or CPU), or nil plus an error.
+-- of path -> row fields plus what it ran on ("DirectML (<GPU name>)" or "CPU"), or nil plus
+-- an error.
 local function processChunk(paths, labelArgs)
 	local listFile = tempFile('klassifier-list.txt')
 	local f = assert(io.open(listFile, 'wb'))
@@ -91,9 +92,12 @@ local function processChunk(paths, labelArgs)
 		if fields[1] == 'OK' or fields[1] == 'ERR' then
 			rows[fields[2]] = fields
 		elseif fields[1] == '#klassifier' then
+			local gpu
 			for _, field in ipairs(fields) do
 				backend = field:match('^backend=(.+)$') or backend
+				gpu = field:match('^gpu=(.+)$') or gpu
 			end
+			if backend and gpu then backend = backend .. ' (' .. gpu .. ')' end
 		end
 	end
 	return rows, backend

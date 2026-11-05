@@ -10,7 +10,11 @@ review window. You can accept them all at once, or adjust a photo's keywords
 first, and the plugin adds them to the photos in the catalog.
 
 The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
-to the CPU. This small model is only slightly slower on the CPU.
+to the CPU. This small model is only slightly slower on the CPU. On a PC with
+more than one GPU (say a desktop CPU's integrated graphics and a graphics
+card), it uses the one Windows ranks as high-performance, normally the
+graphics card. The report's summary names it ("Ran on DirectML (NVIDIA GeForce
+RTX 4090)").
 
 For RAW files the app uses the JPEG preview embedded in the file and never
 decodes the raw data. JPEG, PNG, TIFF and WebP files are read directly. Other
@@ -284,7 +288,7 @@ The output is tab-separated, one line per photo (format documented in
 `klassifier/src/output.rs`):
 
 ```
-#klassifier	2.0.1	backend=DirectML
+#klassifier	2.1.0	backend=DirectML	gpu=NVIDIA GeForce RTX 4090
 #model	load_ms=520	labels=98	label_cache=hit
 OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		Forest=0.1589;Tree=0.1422;Landscape=0.0235;River=0.0147;Lake=0.0074	Forest=0.4512;Tree=0.3628;Landscape=0.0681;River=0.0418;Lake=0.0306	strong	Forest;Tree;Landscape;River	
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
