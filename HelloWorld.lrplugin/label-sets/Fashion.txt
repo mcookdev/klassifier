@@ -4,39 +4,39 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Show
-fashion show
-runway
-fashion model
-catwalk
-audience
-stage
-front row
-designer
-photographer
+Fashion Show
+Runway
+Fashion Model
+Catwalk
+Audience
+Stage
+Front Row
+Designer
+Photographer
 
 # Backstage
-backstage
-makeup
-makeup artist
-hair styling
-hairdresser
-nail salon
-dressing room
-mirror
-getting dressed
+Backstage
+Makeup
+Makeup Artist
+Hair Styling
+Hairdresser
+Nail Salon
+Dressing Room
+Mirror
+Getting Dressed
 
 # Clothing and details
-dress
-gown
-suit
-shoes
-jewelry
-handbag
-hat
-fabric
+Dress
+Gown
+Suit
+Shoes
+Jewelry
+Handbag
+Hat
+Fabric
 
 # Shots
-portrait
-group photo
-close-up
-full body
+Portrait
+Group Photo
+Close-Up
+Full Body

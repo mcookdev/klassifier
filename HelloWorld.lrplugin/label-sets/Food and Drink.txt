@@ -4,57 +4,57 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Meals
-breakfast
-brunch
-lunch
-dinner
-picnic
-barbecue
-family dinner
-restaurant meal
-fast food
-street food
+Breakfast
+Brunch
+Lunch
+Dinner
+Picnic
+Barbecue
+Family Dinner
+Restaurant Meal
+Fast Food
+Street Food
 
 # Dishes
-pizza
-burger
-sandwich
-pasta
-salad
-soup
-sushi
-steak
-seafood
-tacos
-fruit
-vegetables
-bread
+Pizza
+Burger
+Sandwich
+Pasta
+Salad
+Soup
+Sushi
+Steak
+Seafood
+Tacos
+Fruit
+Vegetables
+Bread
 
 # Sweets
-cake
-birthday cake
-cupcakes
-cookies
-ice cream
-dessert
-chocolate
-donuts
-pie
+Cake
+Birthday Cake
+Cupcakes
+Cookies
+Ice Cream
+Dessert
+Chocolate
+Donuts
+Pie
 
 # Drinks
-coffee
-tea
-wine
-beer
-cocktail
-juice
+Coffee
+Tea
+Wine
+Beer
+Cocktail
+Juice
 
 # Making it
-cooking
-baking
-kitchen
-grocery store
-farmers market
-food on a plate
-table setting
-menu
+Cooking
+Baking
+Kitchen
+Grocery Store
+Farmers Market
+Food on a Plate
+Table Setting
+Menu

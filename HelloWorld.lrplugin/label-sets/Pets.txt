@@ -4,40 +4,40 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Dogs
-dog
-puppy
-dog playing fetch
-dog on a walk
-dog sleeping
-dog portrait
-dog at the beach
-dog in the snow
+Dog
+Puppy
+Dog Playing Fetch
+Dog on a Walk
+Dog Sleeping
+Dog Portrait
+Dog at the Beach
+Dog in the Snow
 
 # Cats
-cat
-kitten
-cat sleeping
-cat portrait
+Cat
+Kitten
+Cat Sleeping
+Cat Portrait
 
 # Other pets
-rabbit
-hamster
-guinea pig
-bird in a cage
-fish tank
-turtle
-horse
-lizard
+Rabbit
+Hamster
+Guinea Pig
+Bird in a Cage
+Fish Tank
+Turtle
+Horse
+Lizard
 
 # With people
-child with a pet
-person petting a dog
-person holding a cat
+Child with a Pet
+Person Petting a Dog
+Person Holding a Cat
 
 # Places and things
-dog bed
-pet toy
-veterinarian
-dog park
-backyard
-couch
+Dog Bed
+Pet Toy
+Veterinarian
+Dog Park
+Backyard
+Couch

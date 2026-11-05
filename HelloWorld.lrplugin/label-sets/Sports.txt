@@ -4,49 +4,49 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Sports
-baseball
-softball
-basketball
-football
-soccer
-hockey
-volleyball
-tennis
-golf
-swimming
-track and field
-running race
-cycling
-gymnastics
-martial arts
-wrestling
-skiing
-snowboarding
-skateboarding
-surfing
-horse riding
-bowling
-roller derby
-roller skating
-ice skating
+Baseball
+Softball
+Basketball
+Football
+Soccer
+Hockey
+Volleyball
+Tennis
+Golf
+Swimming
+Track and Field
+Running Race
+Cycling
+Gymnastics
+Martial Arts
+Wrestling
+Skiing
+Snowboarding
+Skateboarding
+Surfing
+Horse Riding
+Bowling
+Roller Derby
+Roller Skating
+Ice Skating
 
 # Moments
-player in action
-team photo
-huddle
-celebration
-coach
-referee
-scoreboard
-trophy
-medal ceremony
+Player in Action
+Team Photo
+Huddle
+Celebration
+Coach
+Referee
+Scoreboard
+Trophy
+Medal Ceremony
 
 # Places and fans
-stadium
-arena
-field
-court
-fans in the stands
-mascot
-cheerleaders
-tailgate party
+Stadium
+Arena
+Field
+Court
+Fans in the Stands
+Mascot
+Cheerleaders
+Tailgate Party

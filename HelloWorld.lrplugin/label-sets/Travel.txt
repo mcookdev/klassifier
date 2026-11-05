@@ -4,63 +4,63 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Landmarks and sights
-famous landmark
-castle
-palace
-cathedral
-ruins
-ancient stone monument
-museum
-art gallery
-statue
-tower
-bridge
-old town
-city skyline
-village
-countryside
-vineyard
+Famous Landmark
+Castle
+Palace
+Cathedral
+Ruins
+Ancient Stone Monument
+Museum
+Art Gallery
+Statue
+Tower
+Bridge
+Old Town
+City Skyline
+Village
+Countryside
+Vineyard
 
 # Places to stay and eat
-hotel
-hotel room
-resort pool
-restaurant
-sidewalk cafe
-street market
-souvenir shop
+Hotel
+Hotel Room
+Resort Pool
+Restaurant
+Sidewalk Cafe
+Street Market
+Souvenir Shop
 
 # Getting there
-airplane
-view from an airplane window
-airport
-cruise ship
-on the deck of a ship
-ferry
-train
-train station
-rental car
-road trip
-map
+Airplane
+View from an Airplane Window
+Airport
+Cruise Ship
+On the Deck of a Ship
+Ferry
+Train
+Train Station
+Rental Car
+Road Trip
+Map
 
 # Beach and outdoors
-tropical beach
-palm trees
-snorkeling
-boat tour
-helicopter tour
-hiking
-scenic viewpoint
-mountains
-waterfall
-sunset
+Tropical Beach
+Palm Trees
+Snorkeling
+Boat Tour
+Helicopter Tour
+Hiking
+Scenic Viewpoint
+Mountains
+Waterfall
+Sunset
 
 # Doing things
-tourists
-guided tour
-selfie at a landmark
-group of travelers
-theme park
-roller coaster
-show or performance
-local food
+Tourists
+Guided Tour
+Selfie at a Landmark
+Group of Travelers
+Theme Park
+Roller Coaster
+Show or Performance
+Local Food

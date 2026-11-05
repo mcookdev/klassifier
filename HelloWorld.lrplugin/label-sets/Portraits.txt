@@ -4,41 +4,41 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Kind
-headshot
-portrait of a man
-portrait of a woman
-portrait of a child
-baby portrait
-senior portrait
-couple portrait
-family portrait
-group portrait
-self portrait
-pet portrait
+Headshot
+Portrait of a Man
+Portrait of a Woman
+Portrait of a Child
+Baby Portrait
+Senior Portrait
+Couple Portrait
+Family Portrait
+Group Portrait
+Self Portrait
+Pet Portrait
 
 # Style
-posed portrait
-candid photo
-studio portrait
-outdoor portrait
-environmental portrait
-black and white portrait
-silhouette
-backlit portrait
-dramatic lighting
-soft natural light
+Posed Portrait
+Candid Photo
+Studio Portrait
+Outdoor Portrait
+Environmental Portrait
+Black and White Portrait
+Silhouette
+Backlit Portrait
+Dramatic Lighting
+Soft Natural Light
 
 # Framing
-close-up of a face
-head and shoulders
-half body
-full body
-profile view
-looking at the camera
-looking away
-eyes closed
+Close-Up of a Face
+Head and Shoulders
+Half Body
+Full Body
+Profile View
+Looking at the Camera
+Looking Away
+Eyes Closed
 
 # Expression
-smiling
-laughing
-serious expression
+Smiling
+Laughing
+Serious Expression

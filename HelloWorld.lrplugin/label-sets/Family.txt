@@ -4,70 +4,70 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # People
-family portrait
-group photo
-couple
-baby
-toddler
-child
-teenager
-grandparents
-grandparent with grandchild
-parent with child
-siblings
-cousins
-selfie
+Family Portrait
+Group Photo
+Couple
+Baby
+Toddler
+Child
+Teenager
+Grandparents
+Grandparent with Grandchild
+Parent with Child
+Siblings
+Cousins
+Selfie
 
 # Moments
-hug
-laughing
-smiling
-kiss
-sleeping baby
-playing
-reading a book
-eating
-cooking together
+Hug
+Laughing
+Smiling
+Kiss
+Sleeping Baby
+Playing
+Reading a Book
+Eating
+Cooking Together
 
 # Celebrations
-birthday party
-birthday cake
-blowing out candles
-opening presents
-christmas
-christmas tree
-thanksgiving dinner
-easter egg hunt
-halloween costume
-wedding
-anniversary
-graduation
-prom
-baby shower
+Birthday Party
+Birthday Cake
+Blowing Out Candles
+Opening Presents
+Christmas
+Christmas Tree
+Thanksgiving Dinner
+Easter Egg Hunt
+Halloween Costume
+Wedding
+Anniversary
+Graduation
+Prom
+Baby Shower
 
 # School and activities
-first day of school
-school play
-recital
-concert
-sports game
-swimming
-dance class
+First Day of School
+School Play
+Recital
+Concert
+Sports Game
+Swimming
+Dance Class
 
 # Outings
-vacation
-beach day
-theme park
-zoo
-park
-playground
-camping
-road trip
-swimming pool
-museum visit
+Vacation
+Beach Day
+Theme Park
+Zoo
+Park
+Playground
+Camping
+Road Trip
+Swimming Pool
+Museum Visit
 
 # Home and pets
-home
-backyard
-dog
-cat
+Home
+Backyard
+Dog
+Cat

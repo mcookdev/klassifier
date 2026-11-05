@@ -8,84 +8,84 @@
 # become top-level keywords named as the label.
 
 # Birds
-bird => Wildlife > Bird
-bird in flight => Wildlife > Bird > In Flight
-egret => Wildlife > Bird > Egret
-heron => Wildlife > Bird > Heron
-seagull => Wildlife > Bird > Seagull
-duck => Wildlife > Bird > Duck
-owl => Wildlife > Bird > Owl
-eagle => Wildlife > Bird > Eagle
-hummingbird => Wildlife > Bird > Hummingbird
-parrot => Wildlife > Bird > Parrot
+Bird => Wildlife > Bird
+Bird in Flight => Wildlife > Bird > In Flight
+Egret => Wildlife > Bird > Egret
+Heron => Wildlife > Bird > Heron
+Seagull => Wildlife > Bird > Seagull
+Duck => Wildlife > Bird > Duck
+Owl => Wildlife > Bird > Owl
+Eagle => Wildlife > Bird > Eagle
+Hummingbird => Wildlife > Bird > Hummingbird
+Parrot => Wildlife > Bird > Parrot
 
 # Animals
-wildlife => Wildlife
-deer => Wildlife > Deer
-squirrel => Wildlife > Squirrel
-rabbit => Wildlife > Rabbit
-fox => Wildlife > Fox
-bear => Wildlife > Bear
-horse => Farm Animals > Horse
-cow => Farm Animals > Cow
-goat => Farm Animals > Goat
-sheep => Farm Animals > Sheep
-lizard => Wildlife > Lizard
-frog => Wildlife > Frog
-snake => Wildlife > Snake
+Wildlife
+Deer => Wildlife > Deer
+Squirrel => Wildlife > Squirrel
+Rabbit => Wildlife > Rabbit
+Fox => Wildlife > Fox
+Bear => Wildlife > Bear
+Horse => Farm Animals > Horse
+Cow => Farm Animals > Cow
+Goat => Farm Animals > Goat
+Sheep => Farm Animals > Sheep
+Lizard => Wildlife > Lizard
+Frog => Wildlife > Frog
+Snake => Wildlife > Snake
 
 # Sea life
-sea turtle
-sea lion
-dolphin
-whale
-fish
-seahorse
-coral reef
-aquarium
-tide pool
+Sea Turtle
+Sea Lion
+Dolphin
+Whale
+Fish
+Seahorse
+Coral Reef
+Aquarium
+Tide Pool
 
 # Insects and close-ups
-insect
-butterfly
-bee
-dragonfly
-spider
-flower
-flower close-up
-leaf
-mushroom
+Insect
+Butterfly
+Bee
+Dragonfly
+Spider
+Flower
+Flower Close-Up
+Leaf
+Mushroom
 
 # Landscapes
-landscape
-mountain
-volcano
-lava
-canyon
-valley
-hills
-cliff
-sea arch
-rocky coast
-beach
-ocean waves
-lake
-river
-waterfall
-forest
-giant tree
-hiking trail
-jungle
-meadow
-desert
-glacier
+Landscape
+Mountain
+Volcano
+Lava
+Canyon
+Valley
+Hills
+Cliff
+Sea Arch
+Rocky Coast
+Beach
+Ocean Waves
+Lake
+River
+Waterfall
+Forest
+Giant Tree
+Hiking Trail
+Jungle
+Meadow
+Desert
+Glacier
 
 # Sky and weather
-sunset
-sunrise
-starry night sky
-clouds
-storm
-rainbow
-fog
-snow
+Sunset
+Sunrise
+Starry Night Sky
+Clouds
+Storm
+Rainbow
+Fog
+Snow

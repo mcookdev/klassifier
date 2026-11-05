@@ -4,74 +4,74 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Cityscapes
-city skyline
-skyscraper
-city at night
-city lights
-aerial view of a city
-rooftops
-river in a city
-bridge
-harbor
-pier
+City Skyline
+Skyscraper
+City at Night
+City Lights
+Aerial View of a City
+Rooftops
+River in a City
+Bridge
+Harbor
+Pier
 
 # Architecture
-architecture
-historic building
-modern building
-cathedral
-church interior
-castle
-palace
-tower
-monument
-statue
-fountain
-museum
-stained glass
-staircase
-archway
+Architecture
+Historic Building
+Modern Building
+Cathedral
+Church Interior
+Castle
+Palace
+Tower
+Monument
+Statue
+Fountain
+Museum
+Stained Glass
+Staircase
+Archway
 
 # Streets
-street
-alley
-town square
-cobblestone street
-crosswalk
-sidewalk cafe
-market
-shop window
-storefront
-neon sign
-graffiti
-street art
+Street
+Alley
+Town Square
+Cobblestone Street
+Crosswalk
+Sidewalk Cafe
+Market
+Shop Window
+Storefront
+Neon Sign
+Graffiti
+Street Art
 
 # People on the street
-pedestrians
-crowd
-street performer
-protest
-parade
-tourists
-pigeons
-seagull
-person walking
-person sitting on a bench
+Pedestrians
+Crowd
+Street Performer
+Protest
+Parade
+Tourists
+Pigeons
+Seagull
+Person Walking
+Person Sitting on a Bench
 
 # Getting around
-traffic
-car
-taxi
-bus
-train
-subway
-train station
-bicycle
-boat
+Traffic
+Car
+Taxi
+Bus
+Train
+Subway
+Train Station
+Bicycle
+Boat
 
 # Look
-reflection
-silhouette
-shadows
-black and white
-long exposure
+Reflection
+Silhouette
+Shadows
+Black and White
+Long Exposure

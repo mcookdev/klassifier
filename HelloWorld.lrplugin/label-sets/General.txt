@@ -6,129 +6,129 @@
 # offers every .txt file in this folder as a label set.
 
 # People
-portrait
-selfie
-group photo
-child
-baby
-family
-couple
-crowd
+Portrait
+Selfie
+Group Photo
+Child
+Baby
+Family
+Couple
+Crowd
 
 # Events
-wedding
-birthday party
-graduation
-concert
-sports
-dance
-holiday
-christmas
-halloween
-costume
-parade
+Wedding
+Birthday Party
+Graduation
+Concert
+Sports
+Dance
+Holiday
+Christmas
+Halloween
+Costume
+Parade
 
 # Animals
-dog
-cat
-bird
-horse
-fish
-insect
-wildlife
-farm animals
+Dog
+Cat
+Bird
+Horse
+Fish
+Insect
+Wildlife
+Farm Animals
 
 # Nature and landscape
-landscape
-mountain
-beach
-ocean
-lake
-river
-waterfall
-forest
-tree
-flower
-garden
-desert
-field
-snow
-sunset
-sunrise
-sky
-clouds
-rain
-fog
+Landscape
+Mountain
+Beach
+Ocean
+Lake
+River
+Waterfall
+Forest
+Tree
+Flower
+Garden
+Desert
+Field
+Snow
+Sunset
+Sunrise
+Sky
+Clouds
+Rain
+Fog
 
 # Places
-city
-street
-building
-architecture
-bridge
-church
-castle
-monument
-museum
-park
-playground
-house
-interior
-kitchen
-restaurant
-school
-stadium
-road
-airport
-train station
+City
+Street
+Building
+Architecture
+Bridge
+Church
+Castle
+Monument
+Museum
+Park
+Playground
+House
+Interior
+Kitchen
+Restaurant
+School
+Stadium
+Road
+Airport
+Train Station
 
 # Things
-car
-boat
-airplane
-train
-bicycle
-motorcycle
-food
-drink
-cake
-toy
-book
-computer
-phone
-document
-screenshot
-painting
-sculpture
-sign
+Car
+Boat
+Airplane
+Train
+Bicycle
+Motorcycle
+Food
+Drink
+Cake
+Toy
+Book
+Computer
+Phone
+Document
+Screenshot
+Painting
+Sculpture
+Sign
 
 # Fashion and beauty
-fashion show
-runway
-fashion model
-backstage
-makeup
-makeup artist
-hair styling
-hairdresser
-beauty salon
-audience
-stage
-photographer
+Fashion Show
+Runway
+Fashion Model
+Backstage
+Makeup
+Makeup Artist
+Hair Styling
+Hairdresser
+Beauty Salon
+Audience
+Stage
+Photographer
 
 # Activities
-hiking
-swimming
-camping
-cooking
-travel
-shopping
-playing
+Hiking
+Swimming
+Camping
+Cooking
+Travel
+Shopping
+Playing
 
 # Look
-night
-black and white
-close-up
-aerial view
-reflection
-silhouette
+Night
+Black and White
+Close-Up
+Aerial View
+Reflection
+Silhouette

@@ -124,7 +124,7 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   case (`bird` reuses `Bird`). New keywords are top level, named as in the
   label set, unless the label set maps the label to a nested keyword (see
   [Nested keywords](#nested-keywords)); the keyword view then shows where it
-  goes, e.g. `egret   (Wildlife > Bird > Egret)`. Virtual copies of a photo get the same keywords. The grid marks
+  goes, e.g. `Egret   (Wildlife > Bird > Egret)`. Virtual copies of a photo get the same keywords. The grid marks
   them: "+1 virtual copy" under a photo means the original and one virtual
   copy are in the batch and both get its keywords; "virtual copy" means only
   a virtual copy was selected. The totals count each photo, so a keyword on a
@@ -140,8 +140,8 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 
 ```
 IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
-        halloween 93%, costume 7%, child 1%, baby <1%, holiday <1%
-        Suggested: halloween, costume
+        Halloween 93%, Costume 7%, Child 1%, Baby <1%, Holiday <1%
+        Suggested: Halloween, Costume
 ```
 
 - The percentages are each label's share of the photo's total score across
@@ -168,7 +168,11 @@ label (backstage makeup coming out as "halloween"), the list probably has
 nothing closer. The fix is to add a label that describes it.
 
 - **Label sets** are the `.txt` files in `HelloWorld.lrplugin/label-sets/`,
-  one label per line, with `#` comments. To add a set, add a file and run
+  one label per line, with `#` comments. Each label is also the name of the
+  keyword it becomes, so the sets spell labels the way keywords should look
+  (Title Case: `Bird in Flight`, `QR Code`). Case doesn't matter to the
+  model, which lowercases every label, so changing it never changes the
+  scores. To add a set, add a file and run
   `make deploy`. It then appears in the dialog's **Label set** menu. The
   plugin comes with:
   - **General** (the default): a bit of everything.
@@ -218,12 +222,12 @@ the same set and hints costs nothing extra.
 A line in a label set can say which Lightroom keyword its label becomes:
 
 ```
-bird => Wildlife > Bird
-egret => Wildlife > Bird > Egret
-sunset
+Bird => Wildlife > Bird
+Egret => Wildlife > Bird > Egret
+Sunset
 ```
 
-Accepting `egret` then adds the keyword `Egret`, under `Bird` under
+Accepting `Egret` then adds the keyword `Egret`, under `Bird` under
 `Wildlife`, creating any level that doesn't exist yet (an existing one is
 reused, whatever its case). The photo gets only `Egret`; Lightroom shows the
 parents in the Keyword List. A line without `=>` makes a top-level keyword
@@ -268,9 +272,9 @@ The output is tab-separated, one line per photo (format documented in
 `hello-app/src/output.rs`):
 
 ```
-#hello-app	1.12.0	backend=DirectML
+#hello-app	1.13.0	backend=DirectML
 #model	load_ms=520	labels=98	label_cache=hit
-OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		forest=0.1589;tree=0.1422;landscape=0.0235;river=0.0147;lake=0.0074	forest=0.4512;tree=0.3628;landscape=0.0681;river=0.0418;lake=0.0306	strong	forest;tree;landscape;river	
+OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		Forest=0.1589;Tree=0.1422;Landscape=0.0235;River=0.0147;Lake=0.0074	Forest=0.4512;Tree=0.3628;Landscape=0.0681;River=0.0418;Lake=0.0306	strong	Forest;Tree;Landscape;River	
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
 #summary	ok=1	err=1	ms=40
 ```

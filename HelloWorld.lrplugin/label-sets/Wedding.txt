@@ -4,51 +4,51 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # People
-bride
-groom
-bride and groom
-bridesmaids
-groomsmen
-wedding party
-flower girl
-ring bearer
-parents of the bride
-wedding guests
-officiant
+Bride
+Groom
+Bride and Groom
+Bridesmaids
+Groomsmen
+Wedding Party
+Flower Girl
+Ring Bearer
+Parents of the Bride
+Wedding Guests
+Officiant
 
 # Getting ready
-bride getting ready
-wedding dress
-groom getting ready
-putting on a tie
-hair and makeup
+Bride Getting Ready
+Wedding Dress
+Groom Getting Ready
+Putting on a Tie
+Hair and Makeup
 
 # Ceremony
-wedding ceremony
-walking down the aisle
-exchanging rings
-first kiss
-church wedding
-outdoor wedding
+Wedding Ceremony
+Walking Down the Aisle
+Exchanging Rings
+First Kiss
+Church Wedding
+Outdoor Wedding
 
 # Reception
-wedding reception
-first dance
-dancing
-toast
-speech
-cutting the cake
-wedding cake
-bouquet toss
-garter toss
-dinner table
-dj
+Wedding Reception
+First Dance
+Dancing
+Toast
+Speech
+Cutting the Cake
+Wedding Cake
+Bouquet Toss
+Garter Toss
+Dinner Table
+DJ
 
 # Details
-wedding rings
-bouquet
-flowers
-table decorations
-invitation
-place cards
-venue
+Wedding Rings
+Bouquet
+Flowers
+Table Decorations
+Invitation
+Place Cards
+Venue

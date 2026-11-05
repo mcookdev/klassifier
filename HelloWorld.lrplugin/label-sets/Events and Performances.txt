@@ -4,49 +4,49 @@
 # Pick this set in the Classify Photos dialog, alone or with hints.
 
 # Performances
-concert
-band playing
-singer
-musician
-orchestra
-choir
-theater play
-musical
-dance performance
-ballet
-circus
-acrobat
-juggler
-clown
-magician
-comedian
-stage
-spotlight
-curtain call
+Concert
+Band Playing
+Singer
+Musician
+Orchestra
+Choir
+Theater Play
+Musical
+Dance Performance
+Ballet
+Circus
+Acrobat
+Juggler
+Clown
+Magician
+Comedian
+Stage
+Spotlight
+Curtain Call
 
 # Crowd and audience
-audience
-crowd
-applause
-front row
+Audience
+Crowd
+Applause
+Front Row
 
 # Formal events
-gala
-banquet
-award ceremony
-speaker at a podium
-presentation
-conference
-formal dinner
-prom
-red carpet
+Gala
+Banquet
+Award Ceremony
+Speaker at a Podium
+Presentation
+Conference
+Formal Dinner
+Prom
+Red Carpet
 
 # Parties and fairs
-party
-dancing
-festival
-fair
-carnival ride
-parade
-fireworks
-costume party
+Party
+Dancing
+Festival
+Fair
+Carnival Ride
+Parade
+Fireworks
+Costume Party
