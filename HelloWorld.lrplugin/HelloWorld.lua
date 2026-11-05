@@ -293,22 +293,32 @@ local function showReport(summary, lines)
 	}
 end
 
--- The target photos to classify, one entry per file: { path, photos }. Virtual copies that
--- share a file with another target photo go in the same entry. Also returns the video count.
+-- The target photos to classify, one entry per file: { path, photos, virtualCopies }.
+-- Virtual copies that share a file with another target photo go in the same entry, with
+-- the original (if targeted) first. `virtualCopies` counts them. Also returns the video count.
 local function collectTargets(catalog)
 	-- getTargetPhotos() returns the selection, or the whole filmstrip if nothing is selected.
 	local photos = catalog:getTargetPhotos()
-	local metadata = catalog:batchGetRawMetadata(photos, { 'path', 'isVideo' })
+	local metadata = catalog:batchGetRawMetadata(photos, { 'path', 'isVideo', 'isVirtualCopy' })
 	local entries, byPath, videos = {}, {}, 0
 	for _, photo in ipairs(photos) do
 		local m = metadata[photo]
 		if m.isVideo then
 			videos = videos + 1
-		elseif byPath[m.path] then
-			table.insert(byPath[m.path].photos, photo)
 		else
-			byPath[m.path] = { path = m.path, photos = { photo } }
-			entries[#entries + 1] = byPath[m.path]
+			local entry = byPath[m.path]
+			if not entry then
+				entry = { path = m.path, photos = {}, virtualCopies = 0 }
+				byPath[m.path] = entry
+				entries[#entries + 1] = entry
+			end
+			if m.isVirtualCopy then
+				entry.virtualCopies = entry.virtualCopies + 1
+				table.insert(entry.photos, photo)
+			else
+				-- The original goes first: its thumbnail represents the file.
+				table.insert(entry.photos, 1, photo)
+			end
 		end
 	end
 	return entries, videos
@@ -364,6 +374,7 @@ local function buildItems(entries, results)
 				path = r.path,
 				name = LrPathUtils.leafName(r.path),
 				photos = byPath[r.path].photos,
+				virtualCopies = byPath[r.path].virtualCopies,
 				candidates = candidates,
 				suggested = suggested,
 			}

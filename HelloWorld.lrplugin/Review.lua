@@ -1,11 +1,12 @@
 --[[----------------------------------------------------------------------------
   Review.lua
   The review window: a paged grid of the classified photos with their suggested
-  keywords, and Accept All / Cancel. Keywords... on a photo opens its keyword
+  keywords, and Accept All / Cancel. The "N Keywords" button on a photo opens its keyword
   view, where the suggestions can be ticked and unticked.
 
   An item is one classified file:
-    { path, name, photos = { LrPhoto... },   -- photos sharing the file (virtual copies)
+    { path, name, photos = { LrPhoto... },   -- photos sharing the file, original first
+      virtualCopies = n,                     -- how many of `photos` are virtual copies
       candidates = { label... },             -- the reported labels, best first
       suggested = { [label] = true },        -- the classifier's suggestions
       chosen = nil | { [label] = true } }    -- the user's choice, once edited
@@ -62,11 +63,21 @@ function Review.totals(items)
 	return keywords, photos
 end
 
+-- "+1 virtual copy" when the original and its copies are targeted, "virtual copy" when only
+-- copies are, "" for an ordinary photo.
+function Review.copyNote(item)
+	local copies = item.virtualCopies or 0
+	if copies == 0 then return '' end
+	local noun = copies == 1 and 'virtual copy' or (copies .. ' virtual copies')
+	if copies == #item.photos then return noun end
+	return '+' .. (copies == 1 and '1 virtual copy' or noun)
+end
+
+-- The slot's button title: "3 Keywords", "1 Keyword", "0 Keywords", "2 Keywords (edited)".
 function Review.itemStatus(item)
-	local n = #Review.keywordsFor(item)
-	if item.chosen then return 'edited: ' .. plural(n, 'keyword') end
-	if n == 0 then return 'no suggestions' end
-	return plural(n, 'keyword')
+	local text = plural(#Review.keywordsFor(item), 'Keyword')
+	if item.chosen then text = text .. ' (edited)' end
+	return text
 end
 
 local function shortName(name)
@@ -98,10 +109,12 @@ local function fillPage(props, items, page)
 		if item then
 			props[key .. 'photo'] = item.photos[1]
 			props[key .. 'name'] = shortName(item.name)
+			props[key .. 'copies'] = Review.copyNote(item)
 			props[key .. 'status'] = Review.itemStatus(item)
 		else
 			-- The thumbnail keeps its last photo but is hidden.
 			props[key .. 'name'] = ''
+			props[key .. 'copies'] = ''
 			props[key .. 'status'] = ''
 		end
 		props[key .. 'visible'] = item ~= nil
@@ -130,12 +143,14 @@ local function openDetail(item)
 			boxes[#boxes + 1] = f:static_text { title = '(no labels)' }
 		end
 
+		local note = Review.copyNote(item)
+		local name = note == '' and item.name or (item.name .. ' (' .. note .. ')')
 		local result = LrDialogs.presentModalDialog {
-			title = 'Keywords: ' .. item.name,
+			title = 'Keywords: ' .. name,
 			contents = f:column {
 				bind_to_object = props,
 				spacing = f:control_spacing(),
-				f:static_text { title = item.name },
+				f:static_text { title = name },
 				f:row {
 					spacing = f:control_spacing(),
 					f:catalog_photo { photo = item.photos[1], width = DETAIL_THUMB, height = DETAIL_THUMB },
@@ -178,9 +193,10 @@ function Review.show(context, items, notes, showDetails)
 				width = THUMB,
 				f:catalog_photo { photo = bind(key .. 'photo'), width = THUMB, height = THUMB, visible = visible },
 				f:static_text { title = bind(key .. 'name'), width = THUMB, visible = visible },
-				f:static_text { title = bind(key .. 'status'), width = THUMB, visible = visible },
+				f:static_text { title = bind(key .. 'copies'), width = THUMB, visible = visible },
 				f:push_button {
-					title = 'Keywords...',
+					title = bind(key .. 'status'),
+					width = THUMB,
 					visible = visible,
 					action = function()
 						local item = items[(props.page - 1) * PER_PAGE + n]

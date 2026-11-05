@@ -107,11 +107,12 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
 - The **Review keywords** window shows the photos 12 at a time (4x3), each
-  with its file name and how many keywords it will get ("3 keywords", "no
-  suggestions", or "edited: 2 keywords" once you've changed them). Use
+  with its file name and a button showing how many keywords it will get
+  ("3 Keywords", "0 Keywords" when nothing was suggested, or
+  "2 Keywords (edited)" once you've changed them). Use
   **< Prev** and **Next >** to page through them. The top shows the totals,
   the label set, and how many files failed, were unsupported or were skipped.
-- **Keywords...** under a photo opens its keyword view: a larger preview and
+- That button opens the photo's keyword view: a larger preview and
   a checkbox for each of its top 10 labels, best first, with the suggested
   ones ticked. Tick or untick them and click **Accept** to keep your choice,
   or **Cancel** to leave it as it was. Nothing is written yet; the photo now
@@ -121,7 +122,11 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   suggestions that you didn't edit get nothing. Keywords are only added,
   never removed, and a keyword that already exists is reused, whatever its
   case (`bird` reuses `Bird`). New keywords are top level, named as in the
-  label set. Virtual copies of a photo get the same keywords. It's one step
+  label set. Virtual copies of a photo get the same keywords. The grid marks
+  them: "+1 virtual copy" under a photo means the original and one virtual
+  copy are in the batch and both get its keywords; "virtual copy" means only
+  a virtual copy was selected. The totals count each photo, so a keyword on a
+  photo and its copy counts twice. It's one step
   in **Edit > Undo**.
 - **Cancel** closes the window without changing anything.
 - **Details...** opens the classification report: each photo's match level,
