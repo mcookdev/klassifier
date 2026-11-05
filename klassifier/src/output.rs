@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! #klassifier<TAB><version>[<TAB>backend=<DirectML|CPU>[<TAB>gpu=<name>]]
-//! #model<TAB>name=<model><TAB>load_ms=<n><TAB>labels=<n><TAB>label_cache=<hit|miss>
+//! #model<TAB>load_ms=<n><TAB>labels=<n><TAB>label_cache=<hit|miss>
 //! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match><TAB><suggested><TAB><keywords>]
 //! ERR<TAB><path><TAB><message>
 //! #summary<TAB>ok=<n><TAB>err=<n><TAB>ms=<n>
@@ -10,10 +10,9 @@
 //!
 //! The last five OK fields, the backend and `#model` are only present when classifying (not
 //! with `--no-classify`). `gpu` is the graphics card's name on DirectML, if Windows gives one.
-//! - `<labels>`: `label=score;label=score;...`, best first, 0.0000-1.0000. The model's own
-//!   score for each label on its own; usually low (a clear match is often 0.05-0.3 with
-//!   SigLIP, 0.001-0.05 with SigLIP 2). Use this for cutoffs: it means the same thing in every
-//!   photo (for one model).
+//! - `<labels>`: `label=score;label=score;...`, best first, 0.0000-1.0000. SigLIP's own score
+//!   for each label on its own; usually low (a clear match is often 0.05-0.3). Use this for
+//!   cutoffs: it means the same thing in every photo.
 //! - `<shares>`: the same labels in the same order, `label=share;...`: each label's share of
 //!   all labels for this photo (they sum to 1 over all labels). Easier to read, but relative.
 //! - `<match>`: `strong`, `good` or `weak`, from the best label's score.
@@ -31,7 +30,10 @@ use std::collections::HashMap;
 use image::metadata::Orientation;
 
 use crate::preview::{long_edge, Loaded};
-use crate::siglip::{self, LabelScore, ModelSpec};
+use crate::siglip::{self, LabelScore, MatchLevel};
+
+/// Images whose long edge is below this are flagged `small`; it is the classifier's input size.
+pub const SMALL_EDGE: u32 = 224;
 
 pub fn header(backend: Option<&str>, gpu: Option<&str>) -> String {
     let mut line = format!("#klassifier\t{}", env!("CARGO_PKG_VERSION"));
@@ -44,25 +46,23 @@ pub fn header(backend: Option<&str>, gpu: Option<&str>) -> String {
     line
 }
 
-pub fn model_line(model: &ModelSpec, load_ms: u128, labels: usize, from_cache: bool) -> String {
+pub fn model_line(load_ms: u128, labels: usize, from_cache: bool) -> String {
     let cache = if from_cache { "hit" } else { "miss" };
-    format!("#model\tname={}\tload_ms={load_ms}\tlabels={labels}\tlabel_cache={cache}", model.name)
+    format!("#model\tload_ms={load_ms}\tlabels={labels}\tlabel_cache={cache}")
 }
 
-/// `model` sets the `small` flag (previews under its input size) and the match level;
 /// `min_score` is the raw-score cutoff for `<suggested>`; `keywords` the labels' keyword
 /// mappings (`LabelSet::keywords`).
 pub fn ok_row(
     path: &str,
     loaded: &Loaded,
-    model: &ModelSpec,
     ms: u128,
     labels: Option<&[LabelScore]>,
     min_score: f32,
     keywords: &HashMap<String, Vec<String>>,
 ) -> String {
     let image = &loaded.image;
-    let flags = if long_edge(image) < model.image_size { "small" } else { "" };
+    let flags = if long_edge(image) < SMALL_EDGE { "small" } else { "" };
     let mut row = format!(
         "OK\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         clean(path),
@@ -89,7 +89,7 @@ pub fn ok_row(
             "\t{}\t{}\t{}\t{}\t{}",
             labels_field(labels, |l| l.score),
             labels_field(labels, |l| l.share),
-            model.match_level(best).as_str(),
+            MatchLevel::from_best_score(best).as_str(),
             suggested.join(";"),
             mapped.join(";")
         ));
@@ -184,19 +184,6 @@ mod tests {
         }
     }
 
-    fn light() -> &'static ModelSpec {
-        &siglip::MODELS[0]
-    }
-
-    #[test]
-    fn small_flag_follows_the_models_input_size() {
-        // A 300 px long edge: above the light model's 224, below SigLIP 2's 384.
-        let image = Loaded { image: image::DynamicImage::new_rgb8(300, 200), ..loaded() };
-        let flags = |m| ok_row("x.jpg", &image, m, 7, None, 0.01, &HashMap::new()).split('\t').nth(7).unwrap().to_string();
-        assert_eq!(flags(light()), "");
-        assert_eq!(flags(siglip::model("siglip2-so400m-fp16").unwrap()), "small");
-    }
-
     #[test]
     fn ok_row_lists_suggested_labels() {
         let labels = [
@@ -204,7 +191,7 @@ mod tests {
             LabelScore { label: "a;b".into(), score: 0.05, share: 0.3 },
             LabelScore { label: "cat".into(), score: 0.004, share: 0.1 },
         ];
-        let row = ok_row("x.jpg", &loaded(), light(), 7, Some(&labels), 0.01, &HashMap::new());
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01, &HashMap::new());
         let fields: Vec<&str> = row.split('\t').collect();
         assert_eq!(fields.len(), 13);
         assert_eq!(fields[10], "strong");
@@ -215,14 +202,14 @@ mod tests {
     #[test]
     fn ok_row_suggests_nothing_below_cutoff() {
         let labels = [LabelScore { label: "dog".into(), score: 0.004, share: 1.0 }];
-        let row = ok_row("x.jpg", &loaded(), light(), 7, Some(&labels), 0.01, &HashMap::new());
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01, &HashMap::new());
         assert!(row.ends_with("\tweak\t\t"), "{row}");
         assert_eq!(row.split('\t').count(), 13);
     }
 
     #[test]
     fn ok_row_without_labels_has_eight_fields() {
-        assert_eq!(ok_row("x.jpg", &loaded(), light(), 7, None, 0.01, &HashMap::new()).split('\t').count(), 8);
+        assert_eq!(ok_row("x.jpg", &loaded(), 7, None, 0.01, &HashMap::new()).split('\t').count(), 8);
     }
 
     #[test]
@@ -236,11 +223,11 @@ mod tests {
             ("odd".to_string(), vec!["A>B;C=D".to_string()]),
             ("owl".to_string(), vec!["Wildlife".to_string()]), // not reported: left out
         ]);
-        let row = ok_row("x.jpg", &loaded(), light(), 7, Some(&labels), 0.01, &keywords);
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01, &keywords);
         assert_eq!(row.split('\t').nth(12), Some("egret=Wildlife>Bird>Egret"));
 
         let odd = [LabelScore { label: "odd".into(), score: 0.2, share: 1.0 }];
-        let row = ok_row("x.jpg", &loaded(), light(), 7, Some(&odd), 0.01, &keywords);
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&odd), 0.01, &keywords);
         assert_eq!(row.split('\t').nth(12), Some("odd=A B C D"));
     }
 
