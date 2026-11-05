@@ -5,6 +5,7 @@
 //! Label embeddings come from the text model, which is only needed when the labels change:
 //! they are cached in a file keyed by the labels and model files.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -219,29 +220,66 @@ pub fn suggested(ranked: &[LabelScore], min: f32, max: usize) -> &[LabelScore] {
     &ranked[..passing.min(max)]
 }
 
+/// Labels read from labels files, with the Lightroom keyword each one maps to, if any.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LabelSet {
+    /// What the model scores, in file order. Never includes the `=> ...` part of a line.
+    pub labels: Vec<String>,
+    /// Label (as in `labels`) -> keyword path from the top level down, e.g. `["Wildlife", "Bird"]`.
+    /// Labels without a mapping aren't in here.
+    pub keywords: HashMap<String, Vec<String>>,
+}
+
 /// Reads and merges labels files: one label per line; blank lines and `#` comments are
-/// skipped. Labels the model would see as the same ("Makeup", "makeup") are kept once, in
-/// the spelling first seen.
-pub fn read_labels(paths: &[PathBuf]) -> Result<Vec<String>> {
-    let mut labels: Vec<String> = Vec::new();
+/// skipped. A line may map its label to a nested keyword: `bird => Wildlife > Bird`. Only the
+/// label goes to the model. Labels the model would see as the same ("Makeup", "makeup") are
+/// kept once, in the spelling and with the mapping first seen.
+pub fn read_labels(paths: &[PathBuf]) -> Result<LabelSet> {
+    let mut set = LabelSet::default();
     let mut seen: Vec<String> = Vec::new();
     for path in paths {
         let text =
             fs::read_to_string(path).with_context(|| format!("cannot read labels file {}", path.display()))?;
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-        for line in text.lines().map(str::trim) {
+        for (index, line) in text.lines().map(str::trim).enumerate() {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let key = prompt(line);
-            if !seen.contains(&key) {
-                seen.push(key);
-                labels.push(line.to_string());
+            let at = || format!("{}:{}", path.display(), index + 1);
+            let (label, keyword) = parse_label_line(line).with_context(at)?;
+            let key = prompt(label);
+            if let Some(i) = seen.iter().position(|k| *k == key) {
+                let first = &set.labels[i];
+                if keyword.is_some() && set.keywords.get(first) != keyword.as_ref() {
+                    eprintln!(
+                        "warning: {}: \"{label}\" is already listed as \"{first}\" ({}); ignoring this line",
+                        at(),
+                        set.keywords.get(first).map_or("no keyword mapping".to_string(), |p| p.join(" > "))
+                    );
+                }
+                continue;
             }
+            seen.push(key);
+            if let Some(keyword) = keyword {
+                set.keywords.insert(label.to_string(), keyword);
+            }
+            set.labels.push(label.to_string());
         }
     }
-    ensure!(!labels.is_empty(), "no labels in {}", paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
-    Ok(labels)
+    ensure!(!set.labels.is_empty(), "no labels in {}", paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
+    Ok(set)
+}
+
+/// `"bird => Wildlife > Bird"` -> `("bird", Some(["Wildlife", "Bird"]))`; `"bird"` -> `("bird", None)`.
+fn parse_label_line(line: &str) -> Result<(&str, Option<Vec<String>>)> {
+    let Some((label, keyword)) = line.split_once("=>") else {
+        return Ok((line, None));
+    };
+    let label = label.trim();
+    ensure!(!label.is_empty(), "no label before \"=>\" in \"{line}\"");
+    let parts: Vec<String> = keyword.split('>').map(|p| p.trim().to_string()).collect();
+    ensure!(parts.iter().all(|p| !p.is_empty()), "empty keyword name after \"=>\" in \"{line}\" (expected e.g. \"Wildlife > Bird\")");
+    Ok((label, Some(parts)))
 }
 
 /// The text the model sees for a label. SigLIP was trained on lowercased text with
@@ -470,9 +508,67 @@ mod tests {
         let hints = dir.join("hints.txt");
         fs::write(&set, "# comment\ndog\n\nmakeup\ndog\n").unwrap();
         fs::write(&hints, "\u{feff}Makeup\nhair styling\r\n").unwrap();
-        assert_eq!(read_labels(&[set.clone(), hints.clone()]).unwrap(), ["dog", "makeup", "hair styling"]);
+        assert_eq!(read_labels(&[set.clone(), hints.clone()]).unwrap().labels, ["dog", "makeup", "hair styling"]);
         fs::write(&set, "# nothing\n").unwrap();
         assert!(read_labels(&[set]).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A scratch directory for one test; removed by the caller.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hello-app-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn keyword_mappings_do_not_change_what_the_model_sees() {
+        let dir = scratch("mapping-test");
+        let plain = dir.join("plain.txt");
+        let mapped = dir.join("mapped.txt");
+        fs::write(&plain, "# Birds\nbird\nbird in flight\negret\nsunset\n").unwrap();
+        fs::write(&mapped, "# Birds\nbird => Wildlife > Bird\nbird in flight=>Wildlife>Bird\n  egret   =>  Wildlife > Bird > Egret \nsunset\n").unwrap();
+        let plain = read_labels(&[plain]).unwrap();
+        let mapped = read_labels(&[mapped]).unwrap();
+
+        // Same labels, so the same prompts, scores and embedding cache.
+        assert_eq!(mapped.labels, plain.labels);
+        assert_eq!(mapped.labels.iter().map(|l| prompt(l)).collect::<Vec<_>>(), plain.labels.iter().map(|l| prompt(l)).collect::<Vec<_>>());
+        fs::write(dir.join("text_model.onnx"), "t").unwrap();
+        fs::write(dir.join("tokenizer.json"), "tok").unwrap();
+        let files = ModelFiles::in_dir(&dir);
+        assert_eq!(cache_key(&files, &mapped.labels).unwrap(), cache_key(&files, &plain.labels).unwrap());
+
+        assert!(plain.keywords.is_empty());
+        assert_eq!(mapped.keywords["bird"], ["Wildlife", "Bird"]);
+        assert_eq!(mapped.keywords["bird in flight"], ["Wildlife", "Bird"]);
+        assert_eq!(mapped.keywords["egret"], ["Wildlife", "Bird", "Egret"]);
+        assert!(!mapped.keywords.contains_key("sunset"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn bad_keyword_mappings_are_errors_with_the_line() {
+        for (line, wanted) in [("=> Wildlife", "no label"), ("bird =>", "empty keyword"), ("bird => Wildlife >> Bird", "empty keyword"), ("bird => > Bird", "empty keyword")] {
+            let dir = scratch("bad-mapping-test");
+            let file = dir.join("set.txt");
+            fs::write(&file, format!("dog\n{line}\n")).unwrap();
+            let message = format!("{:#}", read_labels(&[file]).unwrap_err());
+            assert!(message.contains("set.txt:2") && message.contains(wanted), "{line}: {message}");
+            fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_duplicate_label_keeps_the_first_mapping() {
+        let dir = scratch("duplicate-mapping-test");
+        let file = dir.join("set.txt");
+        fs::write(&file, "Bird => Wildlife > Bird\nbird => Animals\nsunset\nSunset => Sky\n").unwrap();
+        let set = read_labels(&[file]).unwrap();
+        assert_eq!(set.labels, ["Bird", "sunset"]);
+        assert_eq!(set.keywords["Bird"], ["Wildlife", "Bird"]);
+        assert!(!set.keywords.contains_key("sunset"));
         fs::remove_dir_all(&dir).unwrap();
     }
 

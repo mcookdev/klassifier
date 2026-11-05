@@ -2,6 +2,7 @@
 //! in the tab-separated format described in `output.rs`. One photo failing does not stop
 //! the others.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
@@ -118,7 +119,8 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
 }
 
 /// Loads ONNX Runtime, the model and the labels from the exe's folder (laid out by `make deploy`).
-fn load_classifier(args: &Args) -> Result<(Classifier, u128)> {
+/// Also returns the labels' keyword mappings.
+fn load_classifier(args: &Args) -> Result<(Classifier, HashMap<String, Vec<String>>, u128)> {
     let started = Instant::now();
     let exe = std::env::current_exe().context("cannot find the exe's folder")?;
     let dir = exe.parent().context("cannot find the exe's folder")?;
@@ -127,11 +129,11 @@ fn load_classifier(args: &Args) -> Result<(Classifier, u128)> {
     } else {
         args.labels.clone()
     };
-    let labels = siglip::read_labels(&label_files)?;
+    let set = siglip::read_labels(&label_files)?;
     siglip::init_runtime(dir)?;
     let files = ModelFiles::in_dir(&dir.join("models").join("siglip"));
-    let classifier = Classifier::new(&files, labels, &std::env::temp_dir(), args.use_gpu)?;
-    Ok((classifier, started.elapsed().as_millis()))
+    let classifier = Classifier::new(&files, set.labels, &std::env::temp_dir(), args.use_gpu)?;
+    Ok((classifier, set.keywords, started.elapsed().as_millis()))
 }
 
 fn run(args: &Args) -> Result<()> {
@@ -140,9 +142,11 @@ fn run(args: &Args) -> Result<()> {
     }
 
     let mut classifier = None;
+    let mut keywords = HashMap::new();
     let mut out = io::stdout().lock();
     if args.classify {
-        let (c, load_ms) = load_classifier(args)?;
+        let (c, k, load_ms) = load_classifier(args)?;
+        keywords = k;
         writeln!(out, "{}", output::header(Some(c.backend().as_str())))?;
         writeln!(out, "{}", output::model_line(load_ms, c.label_count(), c.labels_from_cache()))?;
         classifier = Some(c);
@@ -165,7 +169,7 @@ fn run(args: &Args) -> Result<()> {
         match result {
             Ok((loaded, labels)) => {
                 let ms = t.elapsed().as_millis();
-                writeln!(out, "{}", output::ok_row(&shown, &loaded, ms, labels.as_deref(), args.min_score))?;
+                writeln!(out, "{}", output::ok_row(&shown, &loaded, ms, labels.as_deref(), args.min_score, &keywords))?;
                 ok += 1;
                 if let Some(dir) = &args.dump {
                     if let Err(e) = dump(dir, path, &loaded.image) {

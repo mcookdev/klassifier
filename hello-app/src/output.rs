@@ -3,12 +3,12 @@
 //! ```text
 //! #hello-app<TAB><version>[<TAB>backend=<DirectML|CPU>]
 //! #model<TAB>load_ms=<n><TAB>labels=<n><TAB>label_cache=<hit|miss>
-//! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match><TAB><suggested>]
+//! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match><TAB><suggested><TAB><keywords>]
 //! ERR<TAB><path><TAB><message>
 //! #summary<TAB>ok=<n><TAB>err=<n><TAB>ms=<n>
 //! ```
 //!
-//! The last four OK fields, the backend and `#model` are only present when classifying (not
+//! The last five OK fields, the backend and `#model` are only present when classifying (not
 //! with `--no-classify`):
 //! - `<labels>`: `label=score;label=score;...`, best first, 0.0000-1.0000. SigLIP's own score
 //!   for each label on its own; usually low (a clear match is often 0.05-0.3). Use this for
@@ -18,9 +18,14 @@
 //! - `<match>`: `strong`, `good` or `weak`, from the best label's score.
 //! - `<suggested>`: `label;label;...`, the labels from `<labels>` suggested as keywords (raw
 //!   score at or above `--min-score`, at most `SUGGEST_MAX`), best first. Empty if none.
+//! - `<keywords>`: `label=Parent>Child;...`, the Lightroom keyword for each label in `<labels>`
+//!   that its labels file maps (`label => Parent > Child`). Labels not listed here are
+//!   top-level keywords named as the label. Empty if none is mapped.
 //!
 //! Lines starting with `#` are informational. Readers must ignore fields beyond the ones
 //! they know, so later versions can append fields.
+
+use std::collections::HashMap;
 
 use image::metadata::Orientation;
 
@@ -43,8 +48,16 @@ pub fn model_line(load_ms: u128, labels: usize, from_cache: bool) -> String {
     format!("#model\tload_ms={load_ms}\tlabels={labels}\tlabel_cache={cache}")
 }
 
-/// `min_score` is the raw-score cutoff for `<suggested>`.
-pub fn ok_row(path: &str, loaded: &Loaded, ms: u128, labels: Option<&[LabelScore]>, min_score: f32) -> String {
+/// `min_score` is the raw-score cutoff for `<suggested>`; `keywords` the labels' keyword
+/// mappings (`LabelSet::keywords`).
+pub fn ok_row(
+    path: &str,
+    loaded: &Loaded,
+    ms: u128,
+    labels: Option<&[LabelScore]>,
+    min_score: f32,
+    keywords: &HashMap<String, Vec<String>>,
+) -> String {
     let image = &loaded.image;
     let flags = if long_edge(image) < SMALL_EDGE { "small" } else { "" };
     let mut row = format!(
@@ -61,12 +74,21 @@ pub fn ok_row(path: &str, loaded: &Loaded, ms: u128, labels: Option<&[LabelScore
         let best = labels.first().map_or(0.0, |l| l.score);
         let suggested: Vec<String> =
             siglip::suggested(labels, min_score, siglip::SUGGEST_MAX).iter().map(|l| label_name(&l.label)).collect();
+        let mapped: Vec<String> = labels
+            .iter()
+            .filter_map(|l| {
+                let parts = keywords.get(&l.label)?;
+                let path: Vec<String> = parts.iter().map(|p| label_name(p).replace('>', " ")).collect();
+                Some(format!("{}={}", label_name(&l.label), path.join(">")))
+            })
+            .collect();
         row.push_str(&format!(
-            "\t{}\t{}\t{}\t{}",
+            "\t{}\t{}\t{}\t{}\t{}",
             labels_field(labels, |l| l.score),
             labels_field(labels, |l| l.share),
             MatchLevel::from_best_score(best).as_str(),
-            suggested.join(";")
+            suggested.join(";"),
+            mapped.join(";")
         ));
     }
     row
@@ -155,24 +177,44 @@ mod tests {
             LabelScore { label: "a;b".into(), score: 0.05, share: 0.3 },
             LabelScore { label: "cat".into(), score: 0.004, share: 0.1 },
         ];
-        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01);
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01, &HashMap::new());
         let fields: Vec<&str> = row.split('\t').collect();
-        assert_eq!(fields.len(), 12);
+        assert_eq!(fields.len(), 13);
         assert_eq!(fields[10], "strong");
         assert_eq!(fields[11], "dog;a b");
+        assert_eq!(fields[12], "");
     }
 
     #[test]
     fn ok_row_suggests_nothing_below_cutoff() {
         let labels = [LabelScore { label: "dog".into(), score: 0.004, share: 1.0 }];
-        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01);
-        assert!(row.ends_with("\tweak\t"), "{row}");
-        assert_eq!(row.split('\t').count(), 12);
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01, &HashMap::new());
+        assert!(row.ends_with("\tweak\t\t"), "{row}");
+        assert_eq!(row.split('\t').count(), 13);
     }
 
     #[test]
     fn ok_row_without_labels_has_eight_fields() {
-        assert_eq!(ok_row("x.jpg", &loaded(), 7, None, 0.01).split('\t').count(), 8);
+        assert_eq!(ok_row("x.jpg", &loaded(), 7, None, 0.01, &HashMap::new()).split('\t').count(), 8);
+    }
+
+    #[test]
+    fn ok_row_lists_keyword_mappings_of_reported_labels() {
+        let labels = [
+            LabelScore { label: "egret".into(), score: 0.2, share: 0.6 },
+            LabelScore { label: "sunset".into(), score: 0.05, share: 0.3 },
+        ];
+        let keywords = HashMap::from([
+            ("egret".to_string(), vec!["Wildlife".to_string(), "Bird".to_string(), "Egret".to_string()]),
+            ("odd".to_string(), vec!["A>B;C=D".to_string()]),
+            ("owl".to_string(), vec!["Wildlife".to_string()]), // not reported: left out
+        ]);
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&labels), 0.01, &keywords);
+        assert_eq!(row.split('\t').nth(12), Some("egret=Wildlife>Bird>Egret"));
+
+        let odd = [LabelScore { label: "odd".into(), score: 0.2, share: 1.0 }];
+        let row = ok_row("x.jpg", &loaded(), 7, Some(&odd), 0.01, &keywords);
+        assert_eq!(row.split('\t').nth(12), Some("odd=A B C D"));
     }
 
     #[test]

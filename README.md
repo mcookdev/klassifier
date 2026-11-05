@@ -122,7 +122,9 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   suggestions that you didn't edit get nothing. Keywords are only added,
   never removed, and a keyword that already exists is reused, whatever its
   case (`bird` reuses `Bird`). New keywords are top level, named as in the
-  label set. Virtual copies of a photo get the same keywords. The grid marks
+  label set, unless the label set maps the label to a nested keyword (see
+  [Nested keywords](#nested-keywords)); the keyword view then shows where it
+  goes, e.g. `egret   (Wildlife > Bird > Egret)`. Virtual copies of a photo get the same keywords. The grid marks
   them: "+1 virtual copy" under a photo means the original and one virtual
   copy are in the batch and both get its keywords; "virtual copy" means only
   a virtual copy was selected. The totals count each photo, so a keyword on a
@@ -211,6 +213,30 @@ shoot. A new combination of labels takes a second or two the first time while
 the text model computes them. They're then cached in `%TEMP%`, and repeating
 the same set and hints costs nothing extra.
 
+### Nested keywords
+
+A line in a label set can say which Lightroom keyword its label becomes:
+
+```
+bird => Wildlife > Bird
+egret => Wildlife > Bird > Egret
+sunset
+```
+
+Accepting `egret` then adds the keyword `Egret`, under `Bird` under
+`Wildlife`, creating any level that doesn't exist yet (an existing one is
+reused, whatever its case). The photo gets only `Egret`; Lightroom shows the
+parents in the Keyword List. A line without `=>` makes a top-level keyword
+named as the label.
+
+Only the part before `=>` is shown to the model, so adding mappings doesn't
+change the scores, and the cached label embeddings are still used. If the
+same label appears twice with different mappings, the first one is used and
+the app prints a warning (in `HelloWorld.log`). A mapping with an empty
+name, like `bird =>` or `bird => Wildlife >> Bird`, is an error that names
+the file and line. The **Nature** set maps its birds and animals this way, as
+an example. Hints can't have mappings.
+
 ### How RAW files are read
 
 For RAW files the app uses the JPEG preview embedded in the file and never
@@ -242,9 +268,9 @@ The output is tab-separated, one line per photo (format documented in
 `hello-app/src/output.rs`):
 
 ```
-#hello-app	1.8.0	backend=DirectML
+#hello-app	1.12.0	backend=DirectML
 #model	load_ms=520	labels=98	label_cache=hit
-OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		forest=0.1589;tree=0.1422;landscape=0.0235;river=0.0147;lake=0.0074	forest=0.4512;tree=0.3628;landscape=0.0681;river=0.0418;lake=0.0306	strong	forest;tree;landscape;river
+OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		forest=0.1589;tree=0.1422;landscape=0.0235;river=0.0147;lake=0.0074	forest=0.4512;tree=0.3628;landscape=0.0681;river=0.0418;lake=0.0306	strong	forest;tree;landscape;river	
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
 #summary	ok=1	err=1	ms=40
 ```

@@ -2,33 +2,37 @@
 #
 # One label per line; blank lines and lines starting with # are ignored.
 # Pick this set in the Classify Photos dialog, alone or with hints.
+#
+# "label => Parent > Child" makes the label's keyword "Child" under "Parent"
+# in Lightroom. Only the label is shown to the model. Labels without "=>"
+# become top-level keywords named as the label.
 
 # Birds
-bird
-bird in flight
-egret
-heron
-seagull
-duck
-owl
-eagle
-hummingbird
-parrot
+bird => Wildlife > Bird
+bird in flight => Wildlife > Bird > In Flight
+egret => Wildlife > Bird > Egret
+heron => Wildlife > Bird > Heron
+seagull => Wildlife > Bird > Seagull
+duck => Wildlife > Bird > Duck
+owl => Wildlife > Bird > Owl
+eagle => Wildlife > Bird > Eagle
+hummingbird => Wildlife > Bird > Hummingbird
+parrot => Wildlife > Bird > Parrot
 
 # Animals
-wildlife
-deer
-squirrel
-rabbit
-fox
-bear
-horse
-cow
-goat
-sheep
-lizard
-frog
-snake
+wildlife => Wildlife
+deer => Wildlife > Deer
+squirrel => Wildlife > Squirrel
+rabbit => Wildlife > Rabbit
+fox => Wildlife > Fox
+bear => Wildlife > Bear
+horse => Farm Animals > Horse
+cow => Farm Animals > Cow
+goat => Farm Animals > Goat
+sheep => Farm Animals > Sheep
+lizard => Wildlife > Lizard
+frog => Wildlife > Frog
+snake => Wildlife > Snake
 
 # Sea life
 sea turtle

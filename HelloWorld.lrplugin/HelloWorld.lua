@@ -358,6 +358,20 @@ local function classifyAll(context, paths, labelArgs)
 	return results, backend, cancelled
 end
 
+-- "egret=Wildlife>Bird>Egret;owl=Wildlife>Bird>Owl" -> { egret = { 'Wildlife', 'Bird', 'Egret' }, ... }
+local function parseKeywordPaths(field)
+	local paths = {}
+	for _, entry in ipairs(splitList(field)) do
+		local label, path = entry:match('^(.-)=(.+)$')
+		if label then
+			local parts = {}
+			for part in path:gmatch('[^>]+') do parts[#parts + 1] = part end
+			paths[label] = parts
+		end
+	end
+	return paths
+end
+
 -- Review items (see Review.lua) for the photos that classified OK, in `results` order.
 local function buildItems(entries, results)
 	local byPath = {}
@@ -366,7 +380,7 @@ local function buildItems(entries, results)
 	for _, r in ipairs(results) do
 		local fields = r.fields
 		if fields and fields[1] == 'OK' then
-			-- Field 9 is "label=score;...", best first; field 12 the suggested labels.
+			-- Field 9 is "label=score;...", best first; 12 the suggested labels; 13 the keyword paths.
 			local candidates, suggested = {}, {}
 			for label in (fields[9] or ''):gmatch('([^;=]+)=[%d.]+') do candidates[#candidates + 1] = label end
 			for _, label in ipairs(splitList(fields[12])) do suggested[label] = true end
@@ -377,6 +391,7 @@ local function buildItems(entries, results)
 				virtualCopies = byPath[r.path].virtualCopies,
 				candidates = candidates,
 				suggested = suggested,
+				paths = parseKeywordPaths(fields[13]),
 			}
 		end
 	end

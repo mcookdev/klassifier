@@ -9,6 +9,7 @@
       virtualCopies = n,                     -- how many of `photos` are virtual copies
       candidates = { label... },             -- the reported labels, best first
       suggested = { [label] = true },        -- the classifier's suggestions
+      paths = { [label] = { name... } },     -- mapped keywords (label => Parent > Child)
       chosen = nil | { [label] = true } }    -- the user's choice, once edited
 ------------------------------------------------------------------------------]]
 
@@ -42,11 +43,16 @@ function Review.keywordsFor(item)
 	return labels
 end
 
+-- The keyword for `label` as a list of names from the top level down: its mapping from the
+-- labels file, or else a top-level keyword named as the label.
+local function pathFor(item, label)
+	return (item.paths and item.paths[label]) or { label }
+end
+
 -- The keywords to write for `item`, each as a list of names from the top level down.
--- Labels are top-level keywords named as written.
 function Review.keywordPaths(item)
 	local paths = {}
-	for _, label in ipairs(Review.keywordsFor(item)) do paths[#paths + 1] = { label } end
+	for _, label in ipairs(Review.keywordsFor(item)) do paths[#paths + 1] = pathFor(item, label) end
 	return paths
 end
 
@@ -137,7 +143,12 @@ local function openDetail(item)
 		local boxes = { spacing = f:label_spacing() }
 		for i, label in ipairs(item.candidates) do
 			props['c' .. i] = set[label] == true
-			boxes[#boxes + 1] = f:checkbox { title = label, value = bind('c' .. i) }
+			-- A mapped label shows where its keyword goes: "egret   (Wildlife > Bird > Egret)".
+			local title = label
+			if item.paths and item.paths[label] then
+				title = label .. '   (' .. table.concat(item.paths[label], ' > ') .. ')'
+			end
+			boxes[#boxes + 1] = f:checkbox { title = title, value = bind('c' .. i) }
 		end
 		if #item.candidates == 0 then
 			boxes[#boxes + 1] = f:static_text { title = '(no labels)' }
