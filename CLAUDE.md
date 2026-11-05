@@ -11,3 +11,4 @@ With every change to the plugin or the app:
 - Bump the semver part that matches the change: `major` for breaking changes, `minor` for new
   features, `revision` for bug fixes. Reset the lower parts to 0 when bumping a higher one.
 - Changes that are only docs or build tooling increment `build` only.
+- This is a personal project, no PR are necessary.
