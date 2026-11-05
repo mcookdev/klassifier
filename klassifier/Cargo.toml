@@ -2,6 +2,7 @@
 name = "klassifier"
 version = "2.4.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.104"

@@ -70,7 +70,8 @@ $(MODEL_DIR)/tokenizer.json:
 # rsync only copies changed files, so the large model files are copied once.
 deploy: lint build fetch
 	mkdir -p "$(DEPLOY_DIR)/$(PLUGIN)"
-	rsync -rt --delete --exclude=.cache "$(PLUGIN)/" "$(VENDOR)/" "$(EXE)" "$(DEPLOY_DIR)/$(PLUGIN)/"
+	rsync -rt --delete --exclude=.cache "$(PLUGIN)/" "$(VENDOR)/" "$(EXE)" \
+		LICENSE THIRD_PARTY_NOTICES.md licenses "$(DEPLOY_DIR)/$(PLUGIN)/"
 	@echo "Deployed to $(DEPLOY_DIR)/$(PLUGIN)"
 
 clean:

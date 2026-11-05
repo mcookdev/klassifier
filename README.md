@@ -310,3 +310,10 @@ Plug-in Manager's log file link.
 
 Open **File > Plug-in Manager**, select "Klassifier", and click
 **Remove**. You can then delete `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`.
+
+## License
+
+Klassifier is under the MIT license (see [LICENSE](LICENSE)). The SigLIP model,
+ONNX Runtime, DirectML and the rawler library are under their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). `make deploy` copies these
+files into the plugin folder.
