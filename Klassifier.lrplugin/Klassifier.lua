@@ -1,6 +1,6 @@
 --[[----------------------------------------------------------------------------
-  HelloWorld.lua
-  Asks for a label set and optional hints, runs hello-app.exe on the targeted
+  Klassifier.lua
+  Asks for a label set and optional hints, runs klassifier.exe on the targeted
   photos in chunks, and opens the review window (Review.lua) with the keywords
   it suggests for each one. Accept All writes them (Keywords.lua).
 ------------------------------------------------------------------------------]]
@@ -20,10 +20,10 @@ local LrView            = import 'LrView'
 local Keywords = require 'Keywords'
 local Review   = require 'Review'
 
-local logger = LrLogger('HelloWorld')
-logger:enable('logfile') -- writes to HelloWorld.log in the Lightroom logs folder
+local logger = LrLogger('Klassifier')
+logger:enable('logfile') -- writes to Klassifier.log in the Lightroom logs folder
 
--- Photos per hello-app.exe run. Cancel is checked between runs.
+-- Photos per klassifier.exe run. Cancel is checked between runs.
 local CHUNK_SIZE = 100
 -- Labels reported per photo: the candidates offered for review.
 local TOP_LABELS = 10
@@ -37,11 +37,11 @@ local function tempFile(name)
 	return LrFileUtils.chooseUniqueFileName(LrPathUtils.child(LrPathUtils.getStandardFilePath('temp'), name))
 end
 
--- Runs hello-app.exe with `args` (already quoted). Returns its output (stdout and stderr),
+-- Runs klassifier.exe with `args` (already quoted). Returns its output (stdout and stderr),
 -- or nil plus an error message.
-local function runHelloApp(args)
-	local exe = LrPathUtils.child(_PLUGIN.path, 'hello-app.exe')
-	local outFile = tempFile('hello-app-output.txt')
+local function runKlassifier(args)
+	local exe = LrPathUtils.child(_PLUGIN.path, 'klassifier.exe')
+	local outFile = tempFile('klassifier-output.txt')
 
 	local cmd = string.format('"%s" %s > "%s" 2>&1', exe, args, outFile)
 	-- cmd /c needs the whole command wrapped in quotes when it contains quoted paths.
@@ -54,7 +54,7 @@ local function runHelloApp(args)
 	if exitCode ~= 0 then
 		-- The app prints "error: ..." explaining why; show the end of its output.
 		local detail = output and output:gsub('%s+$', ''):sub(-1000) or ''
-		return nil, 'hello-app.exe exited with code ' .. tostring(exitCode) .. '\n' .. detail
+		return nil, 'klassifier.exe exited with code ' .. tostring(exitCode) .. '\n' .. detail
 	end
 	if not output then
 		return nil, 'Could not read output file ' .. outFile
@@ -73,12 +73,12 @@ end
 -- Runs the app on one chunk of paths. `labelArgs` are the --labels options. Returns a table
 -- of path -> row fields plus the backend name (DirectML or CPU), or nil plus an error.
 local function processChunk(paths, labelArgs)
-	local listFile = tempFile('hello-app-list.txt')
+	local listFile = tempFile('klassifier-list.txt')
 	local f = assert(io.open(listFile, 'wb'))
 	f:write(table.concat(paths, '\n'), '\n')
 	f:close()
 
-	local output, err = runHelloApp(string.format('%s --list "%s"', labelArgs, listFile))
+	local output, err = runKlassifier(string.format('%s --list "%s"', labelArgs, listFile))
 	LrFileUtils.delete(listFile)
 	if not output then return nil, err end
 	logger:info(output)
@@ -90,7 +90,7 @@ local function processChunk(paths, labelArgs)
 		-- Other lines are comments (#...) or warnings from the app.
 		if fields[1] == 'OK' or fields[1] == 'ERR' then
 			rows[fields[2]] = fields
-		elseif fields[1] == '#hello-app' then
+		elseif fields[1] == '#klassifier' then
 			for _, field in ipairs(fields) do
 				backend = field:match('^backend=(.+)$') or backend
 			end
@@ -127,7 +127,7 @@ local function describe(path, fields, counts, lines)
 	local name = LrPathUtils.leafName(path)
 	if not fields then
 		counts.failed = counts.failed + 1
-		lines[#lines + 1] = name .. ': no result from hello-app'
+		lines[#lines + 1] = name .. ': no result from klassifier'
 	elseif fields[1] == 'OK' then
 		-- OK, path, source, width, height, rotation, ms, flags, labels, shares, match, suggested
 		local source, width, height, ms, flags = fields[3], fields[4], fields[5], fields[7], fields[8]
@@ -254,7 +254,7 @@ local function labelArguments(context, options)
 		args[#args + 1] = string.format('--labels "%s"', setFile)
 	end
 	if #options.hints > 0 then
-		local hintsFile = tempFile('hello-app-hints.txt')
+		local hintsFile = tempFile('klassifier-hints.txt')
 		local f = assert(io.open(hintsFile, 'wb'))
 		f:write(table.concat(options.hints, '\n'), '\n')
 		f:close()
@@ -324,7 +324,7 @@ local function collectTargets(catalog)
 	return entries, videos
 end
 
--- Runs hello-app.exe on `paths` in chunks, with a progress bar. Returns a list of
+-- Runs klassifier.exe on `paths` in chunks, with a progress bar. Returns a list of
 -- { path, fields } in `paths` order, the backend name and whether the user cancelled.
 -- Returns nil if a run fails (after showing why).
 local function classifyAll(context, paths, labelArgs)
@@ -345,7 +345,7 @@ local function classifyAll(context, paths, labelArgs)
 			local err = chunkBackend
 			progress:done()
 			logger:error(err)
-			LrDialogs.message('Classification report', 'Failed to run hello-app.exe:\n' .. err, 'critical')
+			LrDialogs.message('Classification report', 'Failed to run klassifier.exe:\n' .. err, 'critical')
 			return nil
 		end
 		backend = chunkBackend or backend
@@ -398,7 +398,7 @@ local function buildItems(entries, results)
 	return items
 end
 
-LrFunctionContext.postAsyncTaskWithContext('HelloWorld', function(context)
+LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	LrDialogs.attachErrorDialogToFunctionContext(context)
 
 	local entries, videos = collectTargets(LrApplication.activeCatalog())

@@ -7,7 +7,7 @@
 local LrLogger = import 'LrLogger'
 local LrTasks  = import 'LrTasks'
 
-local logger = LrLogger('HelloWorld')
+local logger = LrLogger('Klassifier')
 logger:enable('logfile')
 
 local Keywords = {}

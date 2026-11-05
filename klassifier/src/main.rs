@@ -11,11 +11,11 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
-use hello_app::siglip::{self, Classifier, ModelFiles};
-use hello_app::{output, preview};
+use klassifier::siglip::{self, Classifier, ModelFiles};
+use klassifier::{output, preview};
 
 const USAGE: &str = "\
-Usage: hello-app [options] [paths...]
+Usage: klassifier [options] [paths...]
 
   --list <file>    Read photo paths from <file>, one per line (UTF-8)
   --top <n>        Report the <n> best-scoring labels per photo (default 5)

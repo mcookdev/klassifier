@@ -1,21 +1,21 @@
 --[[----------------------------------------------------------------------------
   Info.lua
-  Hello World plugin for Lightroom Classic.
+  Klassifier plugin for Lightroom Classic.
 ------------------------------------------------------------------------------]]
 
 return {
 	LrSdkVersion = 6.0,
 	LrSdkMinimumVersion = 6.0,
 
-	LrToolkitIdentifier = 'com.example.lightroom.helloworld',
-	LrPluginName = "Hello World",
+	LrToolkitIdentifier = 'com.example.lightroom.klassifier',
+	LrPluginName = "Klassifier",
 	LrPluginInfoUrl = "https://www.example.com",
 
 	-- Adds "Classify Photos" under File > Plug-in Extras
 	LrExportMenuItems = {
 		{
 			title = "Classify Photos",
-			file = "HelloWorld.lua",
+			file = "Klassifier.lua",
 		},
 	},
 
@@ -23,9 +23,9 @@ return {
 	LrLibraryMenuItems = {
 		{
 			title = "Classify Photos",
-			file = "HelloWorld.lua",
+			file = "Klassifier.lua",
 		},
 	},
 
-	VERSION = { major = 1, minor = 13, revision = 0, build = 14 },
+	VERSION = { major = 2, minor = 0, revision = 0, build = 15 },
 }

@@ -3,8 +3,8 @@
 ## Versioning
 
 The version is defined in two places that must stay in sync:
-- `HelloWorld.lrplugin/Info.lua`: `VERSION = { major, minor, revision, build }`
-- `hello-app/Cargo.toml`: `version = "major.minor.revision"`
+- `Klassifier.lrplugin/Info.lua`: `VERSION = { major, minor, revision, build }`
+- `klassifier/Cargo.toml`: `version = "major.minor.revision"`
 
 With every change to the plugin or the app:
 - Increment `build` by 1. It never resets.

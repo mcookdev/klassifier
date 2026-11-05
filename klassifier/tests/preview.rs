@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use hello_app::preview::{load_image, Source};
+use klassifier::preview::{load_image, Source};
 
 fn test_data() -> Option<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-data");
@@ -14,7 +14,7 @@ fn test_data() -> Option<PathBuf> {
 
 /// A fresh scratch directory for one test.
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("hello-app-test-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("klassifier-test-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -131,12 +131,12 @@ fn cli_reports_each_listed_path() {
     let list = tmp.join("list.txt");
     fs::write(&list, format!("\u{feff}{}\r\n{}\r\n\r\n", small.display(), missing.display())).unwrap();
 
-    let out = Command::new(env!("CARGO_BIN_EXE_hello-app")).arg("--no-classify").arg("--list").arg(&list).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_klassifier")).arg("--no-classify").arg("--list").arg(&list).output().unwrap();
     assert!(out.status.success(), "exit {:?}: {}", out.status, String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
 
-    assert!(lines[0].starts_with("#hello-app\t"), "{stdout}");
+    assert!(lines[0].starts_with("#klassifier\t"), "{stdout}");
     assert_eq!(lines[1], format!("OK\t{}\tfile\t100\t50\t0\t{}\tsmall", small.display(), lines[1].split('\t').nth(6).unwrap()));
     assert!(lines[2].starts_with(&format!("ERR\t{}\tcannot open file", missing.display())), "{stdout}");
     assert!(lines[3].starts_with("#summary\tok=1\terr=1\t"), "{stdout}");
@@ -145,6 +145,6 @@ fn cli_reports_each_listed_path() {
 
 #[test]
 fn cli_without_paths_is_a_usage_error() {
-    let out = Command::new(env!("CARGO_BIN_EXE_hello-app")).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_klassifier")).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }

@@ -1,7 +1,7 @@
 //! Tab-separated output read by the Lightroom plugin.
 //!
 //! ```text
-//! #hello-app<TAB><version>[<TAB>backend=<DirectML|CPU>]
+//! #klassifier<TAB><version>[<TAB>backend=<DirectML|CPU>]
 //! #model<TAB>load_ms=<n><TAB>labels=<n><TAB>label_cache=<hit|miss>
 //! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match><TAB><suggested><TAB><keywords>]
 //! ERR<TAB><path><TAB><message>
@@ -36,7 +36,7 @@ use crate::siglip::{self, LabelScore, MatchLevel};
 pub const SMALL_EDGE: u32 = 224;
 
 pub fn header(backend: Option<&str>) -> String {
-    let mut line = format!("#hello-app\t{}", env!("CARGO_PKG_VERSION"));
+    let mut line = format!("#klassifier\t{}", env!("CARGO_PKG_VERSION"));
     if let Some(backend) = backend {
         line.push_str(&format!("\tbackend={backend}"));
     }

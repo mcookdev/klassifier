@@ -1,8 +1,8 @@
-# Hello World Lightroom Plugin
+# Klassifier
 
 A Lightroom Classic plug-in that adds a "Classify Photos" command under
 **File > Plug-in Extras** and **Library > Plug-in Extras**. It runs a small
-Windows console app (`hello-app.exe`, written in Rust) on the targeted photos.
+Windows console app (`klassifier.exe`, written in Rust) on the targeted photos.
 The app scores each photo against a list of labels ("dog", "beach",
 "sunset", ...) with the [SigLIP](https://huggingface.co/google/siglip-base-patch16-224)
 image model, and the plugin shows the suggested keywords for each photo in a
@@ -47,9 +47,9 @@ Build and deploy:
 make deploy
 ```
 
-Or press **Ctrl+Shift+B** in VS Code. This cross-compiles `hello-app.exe` and
+Or press **Ctrl+Shift+B** in VS Code. This cross-compiles `klassifier.exe` and
 copies the plugin folder, the exe and the runtime files to
-`C:\Users\cadre\lr-plugins\HelloWorld.lrplugin`. Only changed files are
+`C:\Users\cadre\lr-plugins\Klassifier.lrplugin`. Only changed files are
 copied, so the model is copied once. To deploy somewhere else:
 
 ```bash
@@ -85,10 +85,10 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 
 1. Run `make deploy`.
 2. Open Lightroom Classic and go to **File > Plug-in Manager**.
-3. Click **Add** and select `C:\Users\cadre\lr-plugins\HelloWorld.lrplugin`.
-   Don't add the repo's `HelloWorld.lrplugin` folder; it doesn't contain the exe
+3. Click **Add** and select `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`.
+   Don't add the repo's `Klassifier.lrplugin` folder; it doesn't contain the exe
    or the model.
-4. Confirm the plugin shows up as "Hello World" with status
+4. Confirm the plugin shows up as "Klassifier" with status
    "Installed and running". Click **Done**.
 
 ## Usage
@@ -102,7 +102,7 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   the dialog warns that it can take a while.
 - Videos are skipped. Virtual copies that share a file with another targeted
   photo are processed only once, and share its suggestions.
-- Photos go to `hello-app.exe` 100 at a time, with a progress bar. Cancel
+- Photos go to `klassifier.exe` 100 at a time, with a progress bar. Cancel
   takes effect between batches. A console window may flash for each batch.
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
@@ -167,7 +167,7 @@ The model can only choose among the labels it's given. If a photo gets an odd
 label (backstage makeup coming out as "halloween"), the list probably has
 nothing closer. The fix is to add a label that describes it.
 
-- **Label sets** are the `.txt` files in `HelloWorld.lrplugin/label-sets/`,
+- **Label sets** are the `.txt` files in `Klassifier.lrplugin/label-sets/`,
   one label per line, with `#` comments. Each label is also the name of the
   keyword it becomes, so the sets spell labels the way keywords should look
   (Title Case: `Bird in Flight`, `QR Code`). Case doesn't matter to the
@@ -236,7 +236,7 @@ named as the label.
 Only the part before `=>` is shown to the model, so adding mappings doesn't
 change the scores, and the cached label embeddings are still used. If the
 same label appears twice with different mappings, the first one is used and
-the app prints a warning (in `HelloWorld.log`). A mapping with an empty
+the app prints a warning (in `Klassifier.log`). A mapping with an empty
 name, like `bird =>` or `bird => Wildlife >> Bird`, is an error that names
 the file and line. The **Nature** set maps its birds and animals this way, as
 an example. Hints can't have mappings.
@@ -252,7 +252,7 @@ upright using their EXIF orientation.
 ### Running the app directly
 
 ```bash
-hello-app.exe [options] [paths...]
+klassifier.exe [options] [paths...]
 ```
 
 - `--list <file>` reads photo paths from a UTF-8 file, one per line.
@@ -269,10 +269,10 @@ hello-app.exe [options] [paths...]
   `<dir>/<file name>.jpg` so you can check it by eye.
 
 The output is tab-separated, one line per photo (format documented in
-`hello-app/src/output.rs`):
+`klassifier/src/output.rs`):
 
 ```
-#hello-app	1.13.0	backend=DirectML
+#klassifier	2.0.0	backend=DirectML
 #model	load_ms=520	labels=98	label_cache=hit
 OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		Forest=0.1589;Tree=0.1422;Landscape=0.0235;River=0.0147;Lake=0.0074	Forest=0.4512;Tree=0.3628;Landscape=0.0681;River=0.0418;Lake=0.0306	strong	Forest;Tree;Landscape;River	
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
@@ -286,11 +286,11 @@ click **Reload Plug-in**.
 
 ## Logs
 
-The plugin writes to `HelloWorld.log` in Lightroom's logs folder, including
-the exact command line used to run `hello-app.exe`. Open it from the
+The plugin writes to `Klassifier.log` in Lightroom's logs folder, including
+the exact command line used to run `klassifier.exe`. Open it from the
 Plug-in Manager's log file link.
 
 ## Uninstalling
 
-Open **File > Plug-in Manager**, select "Hello World", and click
-**Remove**. You can then delete `C:\Users\cadre\lr-plugins\HelloWorld.lrplugin`.
+Open **File > Plug-in Manager**, select "Klassifier", and click
+**Remove**. You can then delete `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`.

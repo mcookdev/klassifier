@@ -525,18 +525,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
-name = "hello-app"
-version = "1.13.0"
-dependencies = [
- "anyhow",
- "image",
- "ndarray",
- "ort",
- "rawler",
- "tokenizers",
-]
-
-[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -811,6 +799,18 @@ dependencies = [
  "jxl-oxide-common",
  "jxl-threadpool",
  "tracing",
+]
+
+[[package]]
+name = "klassifier"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "ndarray",
+ "ort",
+ "rawler",
+ "tokenizers",
 ]
 
 [[package]]

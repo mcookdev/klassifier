@@ -152,7 +152,7 @@ impl Classifier {
         let (vision, backend) = open_session(&files.vision, use_gpu)?;
         check_io(&vision, "pixel_values")?;
 
-        let cache = cache_dir.join(format!("hello-app-siglip-{:016x}.bin", cache_key(files, &labels)?));
+        let cache = cache_dir.join(format!("klassifier-siglip-{:016x}.bin", cache_key(files, &labels)?));
         let (label_embeddings, labels_from_cache) = match read_cache(&cache, labels.len()) {
             Some(embeddings) => (embeddings, true),
             None => {
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn label_files_are_merged_without_duplicates() {
-        let dir = std::env::temp_dir().join(format!("hello-app-labels-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("klassifier-labels-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let set = dir.join("set.txt");
         let hints = dir.join("hints.txt");
@@ -516,7 +516,7 @@ mod tests {
 
     /// A scratch directory for one test; removed by the caller.
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hello-app-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("klassifier-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn cache_round_trips() {
-        let dir = std::env::temp_dir().join(format!("hello-app-cache-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("klassifier-cache-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("c.bin");
         let e = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();

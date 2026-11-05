@@ -1,5 +1,5 @@
-PLUGIN      := HelloWorld.lrplugin
-EXE         := hello-app/target/x86_64-pc-windows-gnu/release/hello-app.exe
+PLUGIN      := Klassifier.lrplugin
+EXE         := klassifier/target/x86_64-pc-windows-gnu/release/klassifier.exe
 DEPLOY_DIR  ?= /mnt/c/Users/cadre/lr-plugins
 # Lightroom runs Lua 5.1; a newer luac accepts syntax Lightroom rejects (goto, //, bitwise ops).
 LUAC        ?= luac5.1
@@ -31,7 +31,7 @@ extract = mkdir -p $(@D) && python3 -I -c 'import sys, zipfile; open(sys.argv[3]
 all: deploy
 
 build:
-	cd hello-app && cargo build --release
+	cd klassifier && cargo build --release
 
 # Syntax check only (-p writes no luac.out). Skipped with a note if luac5.1 isn't installed.
 lint:
@@ -42,7 +42,7 @@ lint:
 	fi
 
 test: lint
-	cd hello-app && cargo test --target x86_64-unknown-linux-gnu
+	cd klassifier && cargo test --target x86_64-unknown-linux-gnu
 
 fetch: $(ASSETS)
 
@@ -74,4 +74,4 @@ deploy: lint build fetch
 	@echo "Deployed to $(DEPLOY_DIR)/$(PLUGIN)"
 
 clean:
-	cd hello-app && cargo clean
+	cd klassifier && cargo clean
