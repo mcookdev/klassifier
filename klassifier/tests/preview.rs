@@ -143,6 +143,36 @@ fn cli_reports_each_listed_path() {
     assert_eq!(lines.len(), 4, "{stdout}");
 }
 
+/// `--thumbs` numbers thumbnails by list position plus `--thumb-start`, skips photos that
+/// fail, and leaves no `.part` files.
+#[test]
+fn cli_writes_numbered_thumbnails() {
+    let tmp = scratch("thumbs");
+    let wide = tmp.join("wide.png");
+    image::RgbImage::new(800, 400).save(&wide).unwrap();
+    let missing = tmp.join("missing.ARW");
+    let tall = tmp.join("tall.png");
+    image::RgbImage::new(100, 300).save(&tall).unwrap();
+    let thumbs = tmp.join("thumbs");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_klassifier"))
+        .args(["--no-classify", "--thumb-start", "101", "--thumb-edge", "200", "--thumbs"])
+        .arg(&thumbs)
+        .args([&wide, &missing, &tall])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "exit {:?}: {}", out.status, String::from_utf8_lossy(&out.stderr));
+
+    let mut names: Vec<String> = fs::read_dir(&thumbs).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert_eq!(names, ["101.jpg", "103.jpg"]);
+    let first = image::open(thumbs.join("101.jpg")).unwrap();
+    assert_eq!((first.width(), first.height()), (200, 100));
+    // Never enlarged.
+    let third = image::open(thumbs.join("103.jpg")).unwrap();
+    assert_eq!((third.width(), third.height()), (67, 200));
+}
+
 #[test]
 fn cli_without_paths_is_a_usage_error() {
     let out = Command::new(env!("CARGO_BIN_EXE_klassifier")).output().unwrap();

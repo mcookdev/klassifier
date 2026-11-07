@@ -1,8 +1,8 @@
 --[[----------------------------------------------------------------------------
   Review.lua
-  The review window: a paged grid of the classified photos with their suggested
-  keywords, and Accept All / Cancel. The "N Keywords" button on a photo opens its keyword
-  view, where the suggestions can be ticked and unticked.
+  The review window: klassifier-ui.exe shows the classified photos in a scrolling grid
+  with their suggested keywords, and Accept All / Cancel. This module writes its input,
+  runs it and reads back the result (format in klassifier/src/ui_model.rs).
 
   An item is one classified file:
     { path, name, photos = { LrPhoto... },   -- photos sharing the file, original first
@@ -10,27 +10,20 @@
       candidates = { label... },             -- the reported labels, best first
       suggested = { [label] = true },        -- the classifier's suggestions
       paths = { [label] = { name... } },     -- mapped keywords (label => Parent > Child)
+      standin, rendered,                     -- thumbnail files (see Thumbs.lua)
       chosen = nil | { [label] = true } }    -- the user's choice, once edited
 ------------------------------------------------------------------------------]]
 
-local LrBinding         = import 'LrBinding'
-local LrDialogs         = import 'LrDialogs'
-local LrFunctionContext = import 'LrFunctionContext'
-local LrTasks           = import 'LrTasks'
-local LrView            = import 'LrView'
+local LrDialogs   = import 'LrDialogs'
+local LrFileUtils = import 'LrFileUtils'
+local LrLogger    = import 'LrLogger'
+
+local Exec = require 'Exec'
+
+local logger = LrLogger('Klassifier')
+logger:enable('logfile')
 
 local Review = {}
-
-local COLUMNS, ROWS = 4, 3
-local PER_PAGE = COLUMNS * ROWS
-local THUMB = 150
-local DETAIL_THUMB = 400
--- File names longer than this are shortened in the middle to fit under the thumbnail.
-local NAME_CHARS = 24
-
-local function plural(n, word)
-	return string.format('%d %s%s', n, word, n == 1 and '' or 's')
-end
 
 -- The labels to write for `item`: its chosen ones if edited, else the suggested ones,
 -- in candidate order.
@@ -79,194 +72,66 @@ function Review.copyNote(item)
 	return '+' .. (copies == 1 and '1 virtual copy' or noun)
 end
 
--- The slot's button title: "3 Keywords", "1 Keyword", "0 Keywords", "2 Keywords (edited)".
-function Review.itemStatus(item)
-	local text = plural(#Review.keywordsFor(item), 'Keyword')
-	if item.chosen then text = text .. ' (edited)' end
-	return text
-end
-
-local function shortName(name)
-	if #name <= NAME_CHARS then return name end
-	local keep = math.floor((NAME_CHARS - 3) / 2)
-	return name:sub(1, keep) .. '...' .. name:sub(-keep)
-end
-
-local function pageCount(items)
-	return math.max(1, math.ceil(#items / PER_PAGE))
-end
-
-local function totalsLine(items)
-	local keywords, photos = Review.totals(items)
-	if keywords == 0 then
-		return plural(#items, 'photo') .. ' to review. No keywords to add.'
-	end
-	return string.format('%s to review. %s to add on %s.',
-		plural(#items, 'photo'), plural(keywords, 'keyword'), plural(photos, 'photo'))
-end
-
--- Shows page `page` of `items` in the slots, and updates the paging and totals text.
-local function fillPage(props, items, page)
-	local pages = pageCount(items)
-	props.page = page
-	for n = 1, PER_PAGE do
-		local item = items[(page - 1) * PER_PAGE + n]
-		local key = 's' .. n .. '_'
-		if item then
-			props[key .. 'photo'] = item.photos[1]
-			props[key .. 'name'] = shortName(item.name)
-			props[key .. 'copies'] = Review.copyNote(item)
-			props[key .. 'status'] = Review.itemStatus(item)
-		else
-			-- The thumbnail keeps its last photo but is hidden.
-			props[key .. 'name'] = ''
-			props[key .. 'copies'] = ''
-			props[key .. 'status'] = ''
-		end
-		props[key .. 'visible'] = item ~= nil
-	end
-	props.pageText = string.format('Page %d of %d', page, pages)
-	props.prevEnabled = page > 1
-	props.nextEnabled = page < pages
-	props.totals = totalsLine(items)
-end
-
--- Shows `item`'s keyword view: its photo and a checkbox per candidate label. Accept saves the
--- ticked labels as `item.chosen` and returns true; Cancel leaves `item` unchanged.
--- Shows a modal dialog, so call it from a task.
-local function openDetail(item)
-	return LrFunctionContext.callWithContext('Review.openDetail', function(context)
-		local f = LrView.osFactory()
-		local bind = LrView.bind
-		local props = LrBinding.makePropertyTable(context)
+-- The review window's input lines for `items` (ui_model.rs describes them).
+local function inputLines(items, notes)
+	local lines = { '#klassifier-ui\treview\t1', 'NOTES\t' .. Exec.escape(notes) }
+	for n, item in ipairs(items) do
 		local set = item.chosen or item.suggested
-		local boxes = { spacing = f:label_spacing() }
-		for i, label in ipairs(item.candidates) do
-			props['c' .. i] = set[label] == true
-			-- A mapped label shows where its keyword goes: "egret   (Wildlife > Bird > Egret)".
-			local title = label
-			if item.paths and item.paths[label] then
-				title = label .. '   (' .. table.concat(item.paths[label], ' > ') .. ')'
-			end
-			boxes[#boxes + 1] = f:checkbox { title = title, value = bind('c' .. i) }
+		lines[#lines + 1] = table.concat({
+			'ITEM', n, Exec.clean(item.name), Exec.clean(Review.copyNote(item)), #item.photos,
+			item.chosen and 1 or 0, Exec.clean(item.standin), Exec.clean(item.rendered),
+		}, '\t')
+		for _, label in ipairs(item.candidates) do
+			local path = item.paths and item.paths[label]
+			lines[#lines + 1] = table.concat({
+				'LABEL', n, Exec.clean(label), item.suggested[label] and 1 or 0, set[label] and 1 or 0,
+				path and Exec.clean(table.concat(path, ' > ')) or '',
+			}, '\t')
 		end
-		if #item.candidates == 0 then
-			boxes[#boxes + 1] = f:static_text { title = '(no labels)' }
-		end
+	end
+	return lines
+end
 
-		local note = Review.copyNote(item)
-		local name = note == '' and item.name or (item.name .. ' (' .. note .. ')')
-		local result = LrDialogs.presentModalDialog {
-			title = 'Keywords: ' .. name,
-			contents = f:column {
-				bind_to_object = props,
-				spacing = f:control_spacing(),
-				f:static_text { title = name },
-				f:row {
-					spacing = f:control_spacing(),
-					f:catalog_photo { photo = item.photos[1], width = DETAIL_THUMB, height = DETAIL_THUMB },
-					f:column(boxes),
-				},
-			},
-			actionVerb = 'Accept',
-			cancelVerb = 'Cancel',
-		}
-		if result ~= 'ok' then return false end
-		local chosen = {}
-		for i, label in ipairs(item.candidates) do
-			if props['c' .. i] then chosen[label] = true end
+-- Reads the window's output: sets `chosen` on the items it lists as edited, and returns
+-- 'accept' or 'cancel', or nil if there is no RESULT line.
+local function readResult(output, items)
+	local result, edited = nil, {}
+	for line in output:gmatch('[^\r\n]+') do
+		local fields = Exec.splitTabs(line)
+		local n = tonumber(fields[2])
+		if fields[1] == 'RESULT' then
+			result = fields[2]
+		elseif fields[1] == 'EDITED' and items[n] then
+			edited[n] = {}
+		elseif fields[1] == 'CHOSEN' and edited[n] then
+			-- The label's position in the item's LABEL lines, which follow its candidates.
+			local label = items[n].candidates[tonumber(fields[3])]
+			if label then edited[n][label] = true end
 		end
-		item.chosen = chosen
-		return true
-	end)
+	end
+	for n, chosen in pairs(edited) do items[n].chosen = chosen end
+	return result
 end
 
 -- Shows the review window for `items` (at least one). `notes` is extra header text (skipped
--- files, cancel). `showDetails`, if given, adds a Details... button that calls it (it may
--- show a modal dialog). Returns 'ok' (Accept All) or 'cancel'.
-function Review.show(context, items, notes, showDetails)
-	local f = LrView.osFactory()
-	local bind = LrView.bind
-	local props = LrBinding.makePropertyTable(context)
-	-- Hidden slots need a photo before the first page is filled.
-	for n = 1, PER_PAGE do props['s' .. n .. '_photo'] = items[1].photos[1] end
-	fillPage(props, items, 1)
-
-	local grid = { spacing = f:control_spacing() }
-	for r = 1, ROWS do
-		local row = { spacing = f:control_spacing() }
-		for c = 1, COLUMNS do
-			-- visible works on controls, not on a column (spike S1), so each control gets it.
-			local n = (r - 1) * COLUMNS + c
-			local key = 's' .. n .. '_'
-			local visible = bind(key .. 'visible')
-			row[#row + 1] = f:column {
-				width = THUMB,
-				f:catalog_photo { photo = bind(key .. 'photo'), width = THUMB, height = THUMB, visible = visible },
-				f:static_text { title = bind(key .. 'name'), width = THUMB, visible = visible },
-				f:static_text { title = bind(key .. 'copies'), width = THUMB, visible = visible },
-				f:push_button {
-					title = bind(key .. 'status'),
-					width = THUMB,
-					visible = visible,
-					action = function()
-						local item = items[(props.page - 1) * PER_PAGE + n]
-						if not item then return end
-						LrTasks.startAsyncTask(function()
-							if openDetail(item) then fillPage(props, items, props.page) end
-						end)
-					end,
-				},
-			}
-		end
-		grid[#grid + 1] = f:row(row)
+-- files, cancel). Returns 'ok' (Accept All) or 'cancel'.
+function Review.show(context, items, notes)
+	local inFile = Exec.tempFile('klassifier-review.txt')
+	context:addCleanupHandler(function() LrFileUtils.delete(inFile) end)
+	local ok, err = Exec.writeLines(inFile, inputLines(items, notes))
+	if not ok then
+		LrDialogs.message('Review keywords', 'Could not write ' .. inFile .. ': ' .. tostring(err), 'critical')
+		return 'cancel'
 	end
-
-	local top = {
-		f:push_button {
-			title = 'Accept All',
-			action = function(button) LrDialogs.stopModalWithResult(button, 'ok') end,
-		},
-		f:push_button {
-			title = 'Cancel',
-			action = function(button) LrDialogs.stopModalWithResult(button, 'cancel') end,
-		},
-	}
-	if showDetails then
-		top[#top + 1] = f:push_button {
-			title = 'Details...',
-			action = function() LrTasks.startAsyncTask(showDetails) end,
-		}
+	local output, runErr = Exec.run('klassifier-ui.exe', string.format('--review --in "%s"', inFile))
+	local result = output and readResult(output, items)
+	if not result then
+		local why = runErr or ('No result from klassifier-ui.exe:\n' .. (output or ''):sub(-1000))
+		logger:error(why)
+		LrDialogs.message('Review keywords', 'The review window failed:\n' .. why, 'critical')
+		return 'cancel'
 	end
-
-	local contents = f:column {
-		bind_to_object = props,
-		spacing = f:control_spacing(),
-		f:row(top),
-		f:static_text { title = bind 'totals', fill_horizontal = 1 },
-		f:static_text { title = notes, height_in_lines = select(2, notes:gsub('\n', '')) + 1, fill_horizontal = 1 },
-		f:column(grid),
-		f:row {
-			f:push_button {
-				title = '< Prev',
-				enabled = bind 'prevEnabled',
-				action = function() fillPage(props, items, props.page - 1) end,
-			},
-			f:static_text { title = bind 'pageText', width_in_chars = 14, alignment = 'center' },
-			f:push_button {
-				title = 'Next >',
-				enabled = bind 'nextEnabled',
-				action = function() fillPage(props, items, props.page + 1) end,
-			},
-		},
-	}
-
-	return LrDialogs.presentModalDialog {
-		title = 'Review keywords',
-		contents = contents,
-		actionVerb = 'Accept All',
-		cancelVerb = 'Cancel',
-	}
+	return result == 'accept' and 'ok' or 'cancel'
 end
 
 return Review

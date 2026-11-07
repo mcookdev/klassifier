@@ -42,9 +42,18 @@ license. Full license texts are in the `licenses/` folder.
   (`licenses/DirectML.txt`), which allow redistributing it as part of an
   application on Windows
 
+## Slint
+
+- Compiled into `klassifier-ui.exe` (the review window)
+- Source: <https://github.com/slint-ui/slint>, version 1.18.1, by SixtyFPS GmbH
+- License: Slint Royalty-free Desktop, Mobile, and Web Applications License
+  2.0 (`licenses/Slint-Royalty-free-2.0.md`). Slint is also available under
+  GPL-3.0; Klassifier uses the royalty-free license. As it requires, the
+  review window's **About** button shows Slint's `AboutSlint` attribution.
+
 ## Rust crates
 
-`klassifier.exe` also includes Rust crates from crates.io. Almost all of them
+`klassifier.exe` and `klassifier-ui.exe` also include Rust crates from crates.io. Almost all of them
 are under MIT and/or Apache-2.0, and some use other permissive licenses (BSD,
 Zlib, ISC, Unicode-3.0). Run `cargo tree` in `klassifier/` to list them; each
 crate's license is in its `Cargo.toml` on crates.io.

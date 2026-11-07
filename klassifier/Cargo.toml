@@ -1,8 +1,18 @@
 [package]
 name = "klassifier"
-version = "2.4.0"
+version = "2.5.3"
 edition = "2021"
 license = "MIT"
+
+[features]
+# The review window (klassifier-ui.exe). Off for `make test`, so the tests build on Linux
+# without the system libraries Slint needs there.
+default = ["ui"]
+ui = ["dep:slint", "dep:slint-build"]
+
+[[bin]]
+name = "klassifier-ui"
+required-features = ["ui"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -13,12 +23,27 @@ ndarray = "0.17.2"
 # ONNX Runtime 1.24, the last release with a DirectML package (see ORT_VERSION in Makefile).
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic", "directml", "api-24"] }
 rawler = "0.8.0"
+# FemtoVG (OpenGL), falling back to the software renderer if OpenGL isn't available.
+slint = { version = "1.18.1", optional = true, default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software"] }
 # fancy-regex instead of the default onig, which is a C library.
 tokenizers = { version = "0.23.2", default-features = false, features = ["fancy-regex"] }
 
+[build-dependencies]
+slint-build = { version = "1.18.1", optional = true }
+
 [profile.release]
 strip = true
+# Thin LTO drops unused code: about a third off both exes, for a little build time.
+lto = "thin"
 
-# Only to name the GPU DirectML runs on (DXGI), for the report.
+# DXGI: to name the GPU DirectML runs on, for the report. The rest: to find Lightroom's
+# window, so the review window opens centred over it.
 [target."cfg(windows)".dependencies]
-windows = { version = "0.62.2", features = ["Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
+windows = { version = "0.62.2", features = [
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }

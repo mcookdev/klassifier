@@ -6,8 +6,9 @@ Windows console app (`klassifier.exe`, written in Rust) on the targeted photos.
 The app scores each photo against a list of labels ("dog", "beach",
 "sunset", ...) with the [SigLIP](https://huggingface.co/google/siglip-base-patch16-224)
 image model, and the plugin shows the suggested keywords for each photo in a
-review window. You can accept them all at once, or adjust a photo's keywords
-first, and the plugin adds them to the photos in the catalog.
+review window (`klassifier-ui.exe`, also Rust, built with
+[Slint](https://slint.dev)). When you accept them, the plugin adds them to the
+photos in the catalog.
 
 The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
 to the CPU. This small model is only slightly slower on the CPU. On a PC with
@@ -53,13 +54,28 @@ make deploy
 ```
 
 Or press **Ctrl+Shift+B** in VS Code. This cross-compiles `klassifier.exe` and
-copies the plugin folder, the exe and the runtime files to
+`klassifier-ui.exe` and copies the plugin folder, the exes and the runtime files to
 `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`. Only changed files are
 copied, so the model is copied once. To deploy somewhere else:
 
 ```bash
 make deploy DEPLOY_DIR=/mnt/c/somewhere
 ```
+
+Each deploy needs a new version: `make deploy` stops unless the version in `Info.lua`
+matches `Cargo.toml` and is newer than the deployed one, with a higher `build` and
+semver version (see [CLAUDE.md](CLAUDE.md)).
+
+To try the review window without Lightroom:
+
+```bash
+make ui-demo
+```
+
+This opens it on Windows with the photos in `test-data/` (repeated up to 500,
+`DEMO_COUNT=...` to change) and made-up labels. Its buttons just close it.
+`make ui-demo DEMO_ARGS="--screenshot shot.png"` saves a picture of the window
+instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
 
 ## Testing
 
@@ -73,8 +89,11 @@ syntax Lightroom rejects. Install it with `sudo apt install lua5.1`. Without it,
 the check is skipped with a note. It catches syntax errors only, not misspelled
 names or wrong SDK calls.
 
-It then runs the app's tests natively on Linux. They cover reading previews, not
-the classifier, because ONNX Runtime is only deployed for Windows. The tests that use real photos
+It then runs the app's tests natively on Linux. They cover reading previews and
+the review window's data (what it reads from and returns to the plugin, and the
+texts it shows), not the classifier, because ONNX Runtime is only deployed for
+Windows, nor the window itself, which is built without its UI so no extra Linux
+libraries are needed. The tests that use real photos
 read `test-data/manifest.tsv` at the repo root and are skipped if it's
 missing. `test-data/` is gitignored because it holds personal photos. Each
 manifest line is tab-separated:
@@ -111,66 +130,58 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   takes effect between batches. A console window may flash for each batch.
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
-- The **Review keywords** window shows the photos 12 at a time (4x3), each
-  with its file name and a button showing how many keywords it will get
-  ("3 Keywords", "0 Keywords" when nothing was suggested, or
-  "2 Keywords (edited)" once you've changed them). Use
-  **< Prev** and **Next >** to page through them. The top shows the totals,
-  the label set, and how many files failed, were unsupported or were skipped.
-- That button opens the photo's keyword view: a larger preview and
-  a checkbox for each of its top 10 labels, best first, with the suggested
-  ones ticked. Tick or untick them and click **Accept** to keep your choice,
-  or **Cancel** to leave it as it was. Nothing is written yet; the photo now
-  shows as edited.
-- **Accept All** (at the top or bottom) adds each photo's keywords: your
-  choice for edited photos, the suggestions for the rest. Photos with no
-  suggestions that you didn't edit get nothing. Keywords are only added,
+- The **Review keywords** window opens centred over Lightroom. It shows all
+  the photos in a scrolling grid that fills the window's width, each with its
+  file name and how many keywords it will get ("3 Keywords", or "0 Keywords"
+  when nothing was suggested). The top shows the totals, the label set, and
+  how many files failed, were unsupported or were skipped.
+- Thumbnails show Lightroom's rendering of each photo, with your edits and
+  crops. For photos Lightroom has no previews of yet, rendering takes it about
+  0.4 s each, so the grid first shows the image the app read (for RAW files,
+  the camera's embedded preview) and swaps in Lightroom's as it arrives.
+- Editing a photo's keywords isn't in this window yet (it comes in the next
+  version).
+- **Accept All** adds each photo's suggested keywords. Photos with no
+  suggestions get nothing. Keywords are only added,
   never removed, and a keyword that already exists is reused, whatever its
   case (`bird` reuses `Bird`). New keywords are top level, named as in the
   label set, unless the label set maps the label to a nested keyword (see
-  [Nested keywords](#nested-keywords)); the keyword view then shows where it
-  goes, e.g. `Egret   (Wildlife > Bird > Egret)`. Virtual copies of a photo get the same keywords. The grid marks
+  [Nested keywords](#nested-keywords)). Virtual copies of a photo get the same keywords. The grid marks
   them: "+1 virtual copy" under a photo means the original and one virtual
   copy are in the batch and both get its keywords; "virtual copy" means only
   a virtual copy was selected. The totals count each photo, so a keyword on a
   photo and its copy counts twice. It's one step
   in **Edit > Undo**. If no photo would get a keyword, it says so and adds
   nothing. If Lightroom's catalog is busy, nothing is added and the review
-  window opens again with your choices kept, so you can click **Accept All**
-  again.
-- **Cancel** closes the window without changing anything.
-- **Details...** opens the classification report: each photo's match level,
-  its top 10 labels and suggestions, the preview size and where it came from,
-  and errors. If no photo could be classified, the report opens instead of
-  the review window.
+  window opens again, so you can click **Accept All** again.
+- **Cancel**, or closing the window, changes nothing.
+- If no photo could be classified, a report opens instead of the review
+  window: each photo's error, and the summary.
+- **About** shows the Slint attribution its license asks for.
+- While Classify Photos is running or its review is open, starting it again
+  says so instead of opening a second one.
 
-### Reading the report (Details...)
+### Scores and suggestions
 
-```
-IMG_7925.CR2  -  strong match    (3456x5184 preview, 116 ms)
-        Halloween 93%, Costume 4%, Child 1%, Baby <1%, Holiday <1%, Party <1%, Mask <1%, Makeup <1%, Portrait <1%, Family <1%
-        Suggested: Halloween, Costume
-```
+The app's output for each photo (in `Klassifier.log`; see
+[Running the app directly](#running-the-app-directly)) has its top 10 labels
+with two numbers each, and a match level:
 
-- **SMALL PREVIEW** after the heading means the image the app read is
-  under 224 px on its long edge, the size the model works at, so the labels
-  are less reliable. The summary at the top counts these.
-- The percentages are each label's share of the photo's total score across
-  all labels. They show how the labels compare for this photo.
-- Shares always add up to 100%, so some label gets a big share even when
-  nothing fits. The match level shows how sure the model is about the top
-  label, from its raw score:
+- The **raw score** is SigLIP's own estimate that a label applies, judged on
+  its own. It's low even for clear matches (often 5-30%), but it means the same
+  thing in every photo, so the keyword cutoff uses it.
+- The **share** is each label's part of the photo's total score across all
+  labels. Shares always add up to 100%, so some label gets a big share even
+  when nothing fits.
+- The **match level** shows how sure the model is about the top label, from
+  its raw score:
   - **strong:** raw score of 10% or more
   - **good:** 1% to 10%
   - **weak:** under 1%, so treat the labels as guesses
-
-The raw score is SigLIP's own estimate that a label applies, judged on its
-own. It's low even for clear matches (often 5-30%). It's in the app's output
-and is what the keyword cutoff uses, since it means the same thing in every
-photo.
-
 - **Suggested** keywords are the top labels with a raw score of at least 1%,
   at most 5 per photo. A weak match suggests none.
+- A photo whose image is under 224 px on its long edge, the size the model
+  works at, is flagged `small`: its labels are less reliable.
 
 ### Labels, label sets and hints
 
@@ -283,6 +294,10 @@ klassifier.exe [options] [paths...]
 - `--no-classify` only reads the previews. It needs no model files.
 - `--dump <dir>` saves each loaded image, at most 1024 px, as
   `<dir>/<file name>.jpg` so you can check it by eye.
+- `--thumbs <dir>` saves a thumbnail of each loaded image as `<dir>/<n>.jpg`,
+  where `<n>` is the photo's position in the list plus `--thumb-start <n>`
+  (default 1). `--thumb-edge <n>` sets its long edge (default 320 px). The
+  plugin uses these as the review window's stand-in thumbnails.
 
 The output is tab-separated, one line per photo (format documented in
 `klassifier/src/output.rs`):
@@ -294,6 +309,10 @@ OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		Forest=0.1589;Tree=0.1422;Lan
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
 #summary	ok=1	err=1	ms=40
 ```
+
+The review window is `klassifier-ui.exe --review --in <file>`; the file it
+reads and what it prints are described in `klassifier/src/ui_model.rs`.
+`klassifier-ui.exe --demo <folder>` is what `make ui-demo` runs.
 
 ## Updating the plugin
 
@@ -314,6 +333,6 @@ Open **File > Plug-in Manager**, select "Klassifier", and click
 ## License
 
 Klassifier is under the MIT license (see [LICENSE](LICENSE)). The SigLIP model,
-ONNX Runtime, DirectML and the rawler library are under their own licenses; see
+ONNX Runtime, DirectML, the rawler library and Slint are under their own licenses; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). `make deploy` copies these
 files into the plugin folder.

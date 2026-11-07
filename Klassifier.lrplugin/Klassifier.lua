@@ -2,7 +2,8 @@
   Klassifier.lua
   Asks for a label set and optional hints, runs klassifier.exe on the targeted
   photos in chunks, and opens the review window (Review.lua) with the keywords
-  it suggests for each one. Accept All writes them (Keywords.lua).
+  it suggests for each one. Accept All writes them (Keywords.lua). Thumbnails for
+  the review are made along the way (Thumbs.lua).
 ------------------------------------------------------------------------------]]
 
 local LrApplication     = import 'LrApplication'
@@ -14,11 +15,12 @@ local LrLogger          = import 'LrLogger'
 local LrPathUtils       = import 'LrPathUtils'
 local LrPrefs           = import 'LrPrefs'
 local LrProgressScope   = import 'LrProgressScope'
-local LrTasks           = import 'LrTasks'
 local LrView            = import 'LrView'
 
+local Exec     = require 'Exec'
 local Keywords = require 'Keywords'
 local Review   = require 'Review'
+local Thumbs   = require 'Thumbs'
 
 local logger = LrLogger('Klassifier')
 logger:enable('logfile') -- writes to Klassifier.log in the Lightroom logs folder
@@ -33,60 +35,21 @@ local WARN_ABOVE = 500
 local LABEL_SET_DIR = 'label-sets'
 local DEFAULT_LABEL_SET = 'General'
 
-local function tempFile(name)
-	return LrFileUtils.chooseUniqueFileName(LrPathUtils.child(LrPathUtils.getStandardFilePath('temp'), name))
-end
+-- Runs the app on one chunk of paths. `labelArgs` are the --labels options, `thumbArgs` the
+-- --thumbs ones. Returns a table of path -> row fields plus what it ran on ("DirectML (<GPU
+-- name>)" or "CPU"), or nil plus an error.
+local function processChunk(paths, labelArgs, thumbArgs)
+	local listFile = Exec.tempFile('klassifier-list.txt')
+	assert(Exec.writeLines(listFile, paths))
 
--- Runs klassifier.exe with `args` (already quoted). Returns its output (stdout and stderr),
--- or nil plus an error message.
-local function runKlassifier(args)
-	local exe = LrPathUtils.child(_PLUGIN.path, 'klassifier.exe')
-	local outFile = tempFile('klassifier-output.txt')
-
-	local cmd = string.format('"%s" %s > "%s" 2>&1', exe, args, outFile)
-	-- cmd /c needs the whole command wrapped in quotes when it contains quoted paths.
-	if WIN_ENV then cmd = '"' .. cmd .. '"' end
-
-	logger:info('Running: ' .. cmd)
-	local exitCode = LrTasks.execute(cmd)
-	local output = LrFileUtils.readFile(outFile)
-	LrFileUtils.delete(outFile)
-	if exitCode ~= 0 then
-		-- The app prints "error: ..." explaining why; show the end of its output.
-		local detail = output and output:gsub('%s+$', ''):sub(-1000) or ''
-		return nil, 'klassifier.exe exited with code ' .. tostring(exitCode) .. '\n' .. detail
-	end
-	if not output then
-		return nil, 'Could not read output file ' .. outFile
-	end
-	return output
-end
-
-local function splitTabs(line)
-	local fields = {}
-	for field in (line .. '\t'):gmatch('([^\t]*)\t') do
-		fields[#fields + 1] = field
-	end
-	return fields
-end
-
--- Runs the app on one chunk of paths. `labelArgs` are the --labels options. Returns a table
--- of path -> row fields plus what it ran on ("DirectML (<GPU name>)" or "CPU"), or nil plus
--- an error.
-local function processChunk(paths, labelArgs)
-	local listFile = tempFile('klassifier-list.txt')
-	local f = assert(io.open(listFile, 'wb'))
-	f:write(table.concat(paths, '\n'), '\n')
-	f:close()
-
-	local output, err = runKlassifier(string.format('%s --list "%s"', labelArgs, listFile))
+	local output, err = Exec.run('klassifier.exe', string.format('%s %s --list "%s"', labelArgs, thumbArgs, listFile))
 	LrFileUtils.delete(listFile)
 	if not output then return nil, err end
 	logger:info(output)
 
 	local rows, backend = {}, nil
 	for line in output:gmatch('[^\r\n]+') do
-		local fields = splitTabs(line)
+		local fields = Exec.splitTabs(line)
 		-- Fields: status, path, ... (extra fields from later versions are ignored).
 		-- Other lines are comments (#...) or warnings from the app.
 		if fields[1] == 'OK' or fields[1] == 'ERR' then
@@ -268,10 +231,8 @@ local function labelArguments(context, options)
 		args[#args + 1] = string.format('--labels "%s"', setFile)
 	end
 	if #options.hints > 0 then
-		local hintsFile = tempFile('klassifier-hints.txt')
-		local f = assert(io.open(hintsFile, 'wb'))
-		f:write(table.concat(options.hints, '\n'), '\n')
-		f:close()
+		local hintsFile = Exec.tempFile('klassifier-hints.txt')
+		assert(Exec.writeLines(hintsFile, options.hints))
 		context:addCleanupHandler(function() LrFileUtils.delete(hintsFile) end)
 		args[#args + 1] = string.format('--labels "%s"', hintsFile)
 	end
@@ -338,10 +299,11 @@ local function collectTargets(catalog)
 	return entries, videos
 end
 
--- Runs klassifier.exe on `paths` in chunks, with a progress bar. Returns a list of
--- { path, fields } in `paths` order, the backend name and whether the user cancelled.
--- Returns nil if a run fails (after showing why).
-local function classifyAll(context, paths, labelArgs)
+-- Runs klassifier.exe on `paths` in chunks, with a progress bar, saving each photo's stand-in
+-- thumbnail into `thumbs` (see Thumbs.lua). Returns a list of { path, fields } in `paths`
+-- order, the backend name and whether the user cancelled. Returns nil if a run fails (after
+-- showing why).
+local function classifyAll(context, paths, labelArgs, thumbs)
 	local progress = LrProgressScope { title = 'Classifying photos', functionContext = context }
 	local results, cancelled, backend = {}, false, nil
 	for first = 1, #paths, CHUNK_SIZE do
@@ -354,7 +316,8 @@ local function classifyAll(context, paths, labelArgs)
 
 		local chunk = {}
 		for i = first, last do chunk[#chunk + 1] = paths[i] end
-		local rows, chunkBackend = processChunk(chunk, labelArgs)
+		local thumbArgs = string.format('--thumbs "%s" --thumb-start %d', thumbs.dir, first)
+		local rows, chunkBackend = processChunk(chunk, labelArgs, thumbArgs)
 		if not rows then
 			local err = chunkBackend
 			progress:done()
@@ -387,11 +350,12 @@ local function parseKeywordPaths(field)
 end
 
 -- Review items (see Review.lua) for the photos that classified OK, in `results` order.
-local function buildItems(entries, results)
+-- `results` are in `entries` order, so a result's position is its thumbnail number.
+local function buildItems(entries, results, thumbs)
 	local byPath = {}
 	for _, entry in ipairs(entries) do byPath[entry.path] = entry end
 	local items = {}
-	for _, r in ipairs(results) do
+	for n, r in ipairs(results) do
 		local fields = r.fields
 		if fields and fields[1] == 'OK' then
 			-- Field 9 is "label=score;...", best first; 12 the suggested labels; 13 the keyword paths.
@@ -406,6 +370,8 @@ local function buildItems(entries, results)
 				candidates = candidates,
 				suggested = suggested,
 				paths = parseKeywordPaths(fields[13]),
+				standin = thumbs.standin(n),
+				rendered = thumbs.rendered(n),
 			}
 		end
 	end
@@ -414,6 +380,14 @@ end
 
 LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	LrDialogs.attachErrorDialogToFunctionContext(context)
+	-- This file runs afresh for each menu click, but required modules are shared, so the flag
+	-- lives in Exec. A second Classify Photos is turned away instead of opening a second review.
+	if Exec.running then
+		LrDialogs.message('Classify Photos', 'Classify Photos is already running. Finish its review first.', 'info')
+		return
+	end
+	Exec.running = true
+	context:addCleanupHandler(function() Exec.running = false end)
 
 	local entries, videos = collectTargets(LrApplication.activeCatalog())
 	local paths, duplicates = {}, 0
@@ -429,8 +403,10 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	local options = askOptions(context, #paths)
 	if not options then return end
 	local labelArgs = labelArguments(context, options)
+	-- Lightroom's thumbnails are requested while classifying, so most are ready for the review.
+	local thumbs = Thumbs.start(context, entries)
 
-	local results, backend, cancelled = classifyAll(context, paths, labelArgs)
+	local results, backend, cancelled = classifyAll(context, paths, labelArgs, thumbs)
 	if not results then return end
 
 	local counts = { loaded = 0, small = 0, failed = 0, unsupported = 0, strong = 0, good = 0, weak = 0 }
@@ -451,7 +427,7 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 		summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 	end
 
-	local items = buildItems(entries, results)
+	local items = buildItems(entries, results, thumbs)
 	if #items == 0 then
 		showReport(summary, lines)
 		return
@@ -465,7 +441,7 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	-- Reopens the review (choices kept) if the catalog is busy when writing.
 	local catalog = LrApplication.activeCatalog()
 	while true do
-		local result = Review.show(context, items, notes, function() showReport(summary, lines) end)
+		local result = Review.show(context, items, notes)
 		if result ~= 'ok' then return end
 		if Review.totals(items) == 0 then
 			LrDialogs.message('Review keywords', 'No keywords to add.', 'info')

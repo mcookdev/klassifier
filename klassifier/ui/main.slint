@@ -1,0 +1,179 @@
+// The review window: a scrolling grid of the classified photos with their keyword counts,
+// and Accept All / Cancel. See src/bin/klassifier-ui/.
+import { Button, ListView, AboutSlint } from "std-widgets.slint";
+
+export struct Cell {
+    index: int,
+    name: string,
+    copies: string,
+    status: string,
+    edited: bool,
+    thumb: image,
+    loaded: bool,
+}
+
+// One grid line.
+export struct GridRow {
+    cells: [Cell],
+}
+
+export global Metrics {
+    out property <length> thumb-size: 160px;
+    out property <length> cell-padding: 8px;
+    out property <length> cell-width: self.thumb-size + 2 * self.cell-padding;
+    out property <length> cell-height: 230px;
+    out property <length> spacing: 6px;
+}
+
+component GridCell inherits Rectangle {
+    in property <Cell> cell;
+    width: Metrics.cell-width;
+    height: Metrics.cell-height;
+    background: #3a3a3a;
+    border-radius: 3px;
+
+    VerticalLayout {
+        padding: Metrics.cell-padding;
+        spacing: 3px;
+        alignment: start;
+        Rectangle {
+            width: Metrics.thumb-size;
+            height: Metrics.thumb-size;
+            background: #313131;
+            if cell.loaded: Image {
+                source: cell.thumb;
+                image-fit: contain;
+                width: parent.width;
+                height: parent.height;
+            }
+        }
+        Text {
+            text: cell.name;
+            color: #dcdcdc;
+            font-size: 11px;
+            overflow: elide;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: cell.copies;
+            color: #9a9a9a;
+            font-size: 10px;
+            overflow: elide;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: cell.status;
+            color: cell.edited ? #e8b85a : #b4b4b4;
+            font-size: 11px;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+export component ReviewWindow inherits Window {
+    title: "Review keywords";
+    preferred-width: 1200px;
+    preferred-height: 800px;
+    min-width: 640px;
+    min-height: 420px;
+    background: #262626;
+    default-font-size: 12px;
+
+    in property <[GridRow]> rows;
+    in property <string> totals;
+    in property <string> notes;
+    // Cells that fit across the list, the scrollbar excluded.
+    out property <int> columns: max(1, floor((list.visible-width - Metrics.spacing) / (Metrics.cell-width + Metrics.spacing)));
+    callback columns-changed(int);
+    callback accept-all();
+    callback cancel();
+
+    changed columns => {
+        root.columns-changed(root.columns);
+    }
+
+    about := PopupWindow {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: 420px;
+        Rectangle {
+            background: #1e1e1e;
+            border-color: #555555;
+            border-width: 1px;
+            border-radius: 4px;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+                Text {
+                    text: "Klassifier: review keywords";
+                    color: #e0e0e0;
+                    font-size: 14px;
+                }
+                AboutSlint { }
+            }
+        }
+    }
+
+    VerticalLayout {
+        Rectangle {
+            background: #1c1c1c;
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 8px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: root.totals;
+                        color: #e0e0e0;
+                        font-size: 14px;
+                    }
+                    if root.notes != "": Text {
+                        text: root.notes;
+                        color: #a0a0a0;
+                        wrap: word-wrap;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            text: "About";
+                            clicked => {
+                                about.show();
+                            }
+                        }
+                        Button {
+                            text: "Cancel";
+                            clicked => {
+                                root.cancel();
+                            }
+                        }
+                        Button {
+                            text: "Accept All";
+                            primary: true;
+                            clicked => {
+                                root.accept-all();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        list := ListView {
+            for row in root.rows: HorizontalLayout {
+                height: Metrics.cell-height + Metrics.spacing;
+                padding-top: Metrics.spacing;
+                padding-left: Metrics.spacing;
+                spacing: Metrics.spacing;
+                alignment: start;
+                for cell in row.cells: GridCell {
+                    cell: cell;
+                }
+            }
+        }
+    }
+}

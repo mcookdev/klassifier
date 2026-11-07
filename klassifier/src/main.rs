@@ -24,15 +24,23 @@ Usage: klassifier [options] [paths...]
                    (default: label-sets/General.txt next to the exe)
   --cpu            Don't use the GPU
   --no-classify    Only read the previews; needs no model files
-  --dump <dir>     Save each loaded image, at most 1024 px, as <dir>/<file name>.jpg";
+  --dump <dir>     Save each loaded image, at most 1024 px, as <dir>/<file name>.jpg
+  --thumbs <dir>   Save a thumbnail of each loaded image as <dir>/<n>.jpg, where <n> is
+                   the photo's position in the list plus --thumb-start (default 1)
+  --thumb-start <n>   Number of the first photo's thumbnail
+  --thumb-edge <n>    Thumbnails' long edge in pixels (default 320)";
 
 /// Long edge of images written by `--dump`.
 const DUMP_EDGE: u32 = 1024;
+const DEFAULT_THUMB_EDGE: u32 = 320;
 const DEFAULT_TOP: usize = 5;
 
 struct Args {
     paths: Vec<PathBuf>,
     dump: Option<PathBuf>,
+    thumbs: Option<PathBuf>,
+    thumb_start: usize,
+    thumb_edge: u32,
     top: usize,
     labels: Vec<PathBuf>,
     min_score: f32,
@@ -66,6 +74,9 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
     let mut args = Args {
         paths: Vec::new(),
         dump: None,
+        thumbs: None,
+        thumb_start: 1,
+        thumb_edge: DEFAULT_THUMB_EDGE,
         top: DEFAULT_TOP,
         labels: Vec::new(),
         min_score: siglip::SUGGEST_MIN,
@@ -89,6 +100,20 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
                 );
             }
             Some("--dump") => args.dump = Some(PathBuf::from(it.next().context("--dump needs a directory")?)),
+            Some("--thumbs") => args.thumbs = Some(PathBuf::from(it.next().context("--thumbs needs a directory")?)),
+            Some("--thumb-start") => {
+                args.thumb_start = it
+                    .next()
+                    .and_then(|n| n.to_str().and_then(|s| s.parse().ok()))
+                    .context("--thumb-start needs a number")?;
+            }
+            Some("--thumb-edge") => {
+                args.thumb_edge = it
+                    .next()
+                    .and_then(|n| n.to_str().and_then(|s| s.parse().ok()))
+                    .filter(|&n: &u32| n >= 16)
+                    .context("--thumb-edge needs a number of at least 16")?;
+            }
             Some("--labels") => args.labels.push(PathBuf::from(it.next().context("--labels needs a file")?)),
             Some("--top") => {
                 let n = it.next().context("--top needs a number")?;
@@ -137,7 +162,7 @@ fn load_classifier(args: &Args) -> Result<(Classifier, HashMap<String, Vec<Strin
 }
 
 fn run(args: &Args) -> Result<()> {
-    if let Some(dir) = &args.dump {
+    for dir in [&args.dump, &args.thumbs].into_iter().flatten() {
         fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
     }
 
@@ -156,7 +181,7 @@ fn run(args: &Args) -> Result<()> {
 
     let started = Instant::now();
     let (mut ok, mut err) = (0, 0);
-    for path in &args.paths {
+    for (i, path) in args.paths.iter().enumerate() {
         let shown = path.to_string_lossy();
         let t = Instant::now();
         let result = preview::load_image(path).and_then(|loaded| {
@@ -176,6 +201,12 @@ fn run(args: &Args) -> Result<()> {
                         eprintln!("warning: cannot dump {shown}: {e:#}");
                     }
                 }
+                if let Some(dir) = &args.thumbs {
+                    let target = dir.join(format!("{}.jpg", args.thumb_start + i));
+                    if let Err(e) = save_thumb(&loaded.image, args.thumb_edge, &target) {
+                        eprintln!("warning: cannot save the thumbnail of {shown}: {e:#}");
+                    }
+                }
             }
             Err(e) => {
                 writeln!(out, "{}", output::err_row(&shown, &e))?;
@@ -193,5 +224,15 @@ fn dump(dir: &Path, path: &Path, image: &image::DynamicImage) -> Result<()> {
     let mut target = dir.join(name);
     target.as_mut_os_string().push(".jpg");
     image.thumbnail(DUMP_EDGE, DUMP_EDGE).to_rgb8().save(&target)?;
+    Ok(())
+}
+
+/// Writes `<target>.part`, then renames it, so the review window never reads half a file.
+fn save_thumb(image: &image::DynamicImage, edge: u32, target: &Path) -> Result<()> {
+    let mut part = target.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
+    image.thumbnail(edge, edge).to_rgb8().save_with_format(&part, image::ImageFormat::Jpeg)?;
+    fs::rename(&part, target)?;
     Ok(())
 }
