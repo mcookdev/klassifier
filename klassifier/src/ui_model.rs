@@ -24,6 +24,16 @@
 //! CHOSEN<TAB><n><TAB><k>      (for each ticked label of an edited item; k counts its LABEL lines from 1)
 //! ```
 //!
+//! The no-results report (`--report`) reads:
+//!
+//! ```text
+//! #klassifier-ui<TAB>report<TAB>1
+//! SUMMARY<TAB><text, escaped as NOTES>
+//! LINE<TAB><text>             (one per report line; the rest of the line, tabs included)
+//! ```
+//!
+//! and writes `RESULT<TAB>ok` when closed.
+//!
 //! Lines starting with `#` are informational. Readers ignore unknown lines and extra fields.
 
 use std::io::{self, Write};
@@ -63,6 +73,8 @@ pub struct ReviewInput {
 pub enum Outcome {
     Accept,
     Cancel,
+    /// The report was closed.
+    Ok,
 }
 
 impl Outcome {
@@ -70,6 +82,7 @@ impl Outcome {
         match self {
             Outcome::Accept => "accept",
             Outcome::Cancel => "cancel",
+            Outcome::Ok => "ok",
         }
     }
 }
@@ -176,15 +189,20 @@ fn number(field: &str, what: &str, line: usize) -> Result<usize> {
     field.parse().with_context(|| format!("line {line}: {what} must be a number, not {field:?}"))
 }
 
-pub fn parse_review(text: &str) -> Result<ReviewInput> {
+/// The numbered lines after the `#klassifier-ui<TAB><kind>` header line.
+fn body<'a>(text: &'a str, kind: &str) -> Result<impl Iterator<Item = (usize, &'a str)>> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut lines = text.lines().enumerate().map(|(i, l)| (i + 1, l.trim_end_matches('\r')));
+    let header = format!("#klassifier-ui\t{kind}");
     match lines.next() {
-        Some((_, first)) if first.starts_with("#klassifier-ui\treview") => {}
-        _ => bail!("not a review file (it must start with #klassifier-ui<TAB>review)"),
+        Some((_, first)) if first == header || first.starts_with(&format!("{header}\t")) => Ok(lines),
+        _ => bail!("not a {kind} file (it must start with #klassifier-ui<TAB>{kind})"),
     }
+}
+
+pub fn parse_review(text: &str) -> Result<ReviewInput> {
     let mut input = ReviewInput::default();
-    for (n, line) in lines {
+    for (n, line) in body(text, "review")? {
         let fields: Vec<&str> = line.split('\t').collect();
         match fields[0] {
             "NOTES" => input.notes = unescape(fields.get(1).copied().unwrap_or("")),
@@ -226,6 +244,25 @@ pub fn parse_review(text: &str) -> Result<ReviewInput> {
         }
     }
     Ok(input)
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct ReportInput {
+    pub summary: String,
+    pub lines: Vec<String>,
+}
+
+pub fn parse_report(text: &str) -> Result<ReportInput> {
+    let mut report = ReportInput::default();
+    for (_, line) in body(text, "report")? {
+        let (tag, rest) = line.split_once('\t').unwrap_or((line, ""));
+        match tag {
+            "SUMMARY" => report.summary = unescape(rest),
+            "LINE" => report.lines.push(rest.to_string()),
+            _ => {}
+        }
+    }
+    Ok(report)
 }
 
 pub fn write_result(out: &mut impl Write, outcome: Outcome, items: &[Item]) -> io::Result<()> {

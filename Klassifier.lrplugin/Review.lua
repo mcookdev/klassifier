@@ -3,7 +3,8 @@
   The review window: klassifier-ui.exe shows the classified photos in a scrolling grid
   with their suggested keywords, a side panel to change a photo's keywords, and
   Accept All / Cancel. This module writes its input, runs it and reads back the
-  result, including the changes (format in klassifier/src/ui_model.rs).
+  result, including the changes (format in klassifier/src/ui_model.rs). It also
+  shows the report for a run where nothing could be classified.
 
   An item is one classified file:
     { path, name, photos = { LrPhoto... },   -- photos sharing the file, original first
@@ -133,6 +134,26 @@ function Review.show(context, items, notes)
 		return 'cancel'
 	end
 	return result == 'accept' and 'ok' or 'cancel'
+end
+
+-- Shows the report for a run where no photo could be classified: `summary`, then `lines`
+-- (each photo's error). Returns when it is closed.
+function Review.showReport(context, summary, lines)
+	local inFile = Exec.tempFile('klassifier-report.txt')
+	context:addCleanupHandler(function() LrFileUtils.delete(inFile) end)
+	local input = { '#klassifier-ui\treport\t1', 'SUMMARY\t' .. Exec.escape(summary) }
+	for _, line in ipairs(lines) do input[#input + 1] = 'LINE\t' .. Exec.clean(line) end
+	local ok, err = Exec.writeLines(inFile, input)
+	local output, runErr
+	if ok then
+		output, runErr = Exec.run('klassifier-ui.exe', string.format('--report --in "%s"', inFile))
+	end
+	if not output then
+		-- The window failed: show the gist in a plain message instead.
+		local why = runErr or ('Could not write ' .. inFile .. ': ' .. tostring(err))
+		logger:error(why)
+		LrDialogs.message('Classification report', summary .. '\n\n(The report window failed: ' .. why .. ')', 'warning')
+	end
 end
 
 return Review

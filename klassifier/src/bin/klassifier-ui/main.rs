@@ -1,6 +1,7 @@
-//! klassifier-ui: the plugin's review window. Reads the photos and their suggested keywords
-//! from a file written by the plugin, shows them, and prints what the user decided. The
-//! exchange format is described in `klassifier::ui_model`.
+//! klassifier-ui: the plugin's windows. The review window reads the photos and their
+//! suggested keywords from a file written by the plugin, shows them, and prints what the user
+//! decided; the report window shows why no photo could be classified. The exchange formats
+//! are described in `klassifier::ui_model`.
 #![windows_subsystem = "windows"]
 
 mod grid;
@@ -23,13 +24,15 @@ use std::rc::Rc;
 use anyhow::{bail, Context, Result};
 use slint::platform::Key;
 use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString};
-use ui_model::{move_selection, Item, Label, Move, Outcome, ReviewInput};
+use ui_model::{move_selection, Item, Label, Move, Outcome, ReportInput, ReviewInput};
 
 const USAGE: &str = "\
 Usage: klassifier-ui --review --in <file>
+       klassifier-ui --report --in <file>
        klassifier-ui --demo <folder> [--count <n>] [--select <n>] [--screenshot <png>]
 
   --review --in <file>  Review the photos in <file> (written by the plugin)
+  --report --in <file>  Show the report in <file> (written by the plugin)
   --demo <folder>       Review the JPEGs in <folder> with made-up labels (for development);
                         --count repeats them up to <n> photos
   --select <n>          Start with photo <n> (from 1) selected
@@ -47,6 +50,7 @@ struct Args {
 
 enum Input {
     Review(PathBuf),
+    Report(PathBuf),
     Demo(PathBuf, usize),
 }
 
@@ -61,12 +65,13 @@ fn main() -> ExitCode {
 }
 
 fn parse_args() -> Result<Args> {
-    let (mut review, mut file, mut demo, mut count, mut screenshot) = (false, None, None, None, None);
+    let (mut review, mut report, mut file, mut demo, mut count, mut screenshot) = (false, false, None, None, None, None);
     let mut select = 0;
     let mut it = std::env::args_os().skip(1);
     while let Some(arg) = it.next() {
         match arg.to_str() {
             Some("--review") => review = true,
+            Some("--report") => report = true,
             Some("--in") => file = Some(PathBuf::from(it.next().context("--in needs a file")?)),
             Some("--demo") => demo = Some(PathBuf::from(it.next().context("--demo needs a folder")?)),
             Some("--count") => {
@@ -89,20 +94,29 @@ fn parse_args() -> Result<Args> {
             _ => bail!("unknown argument {}\n\n{USAGE}", arg.to_string_lossy()),
         }
     }
-    let input = match (review, file, demo) {
-        (true, Some(file), None) => Input::Review(file),
-        (false, None, Some(dir)) => Input::Demo(dir, count.unwrap_or(0)),
-        _ => bail!("give --review --in <file>, or --demo <folder>\n\n{USAGE}"),
+    let input = match (review, report, file, demo) {
+        (true, false, Some(file), None) => Input::Review(file),
+        (false, true, Some(file), None) => Input::Report(file),
+        (false, false, None, Some(dir)) => Input::Demo(dir, count.unwrap_or(0)),
+        _ => bail!("give --review --in <file>, --report --in <file>, or --demo <folder>\n\n{USAGE}"),
     };
     Ok(Args { input, select, screenshot })
+}
+
+fn read(file: &Path) -> Result<String> {
+    fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))
 }
 
 fn run() -> Result<()> {
     let args = parse_args()?;
     let input = match &args.input {
         Input::Review(file) => {
-            let text = fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
-            ui_model::parse_review(&text).with_context(|| format!("cannot read {}", file.display()))?
+            ui_model::parse_review(&read(file)?).with_context(|| format!("cannot read {}", file.display()))?
+        }
+        Input::Report(file) => {
+            let report =
+                ui_model::parse_report(&read(file)?).with_context(|| format!("cannot read {}", file.display()))?;
+            return show_report(report, args.screenshot.as_deref());
         }
         Input::Demo(dir, count) => demo_input(dir, *count)?,
     };
@@ -111,10 +125,40 @@ fn run() -> Result<()> {
     }
     let select = args.select.min(input.items.len() - 1);
     if let Some(png) = &args.screenshot {
-        return screenshot(input, select, png);
+        // Off screen there is no event loop to run `changed` handlers, so pass the column
+        // count on each frame.
+        return screenshot(
+            png,
+            || Ok(build(input, select, false)?.0),
+            |ui: &ReviewWindow| ui.invoke_columns_changed(ui.get_columns()),
+        );
     }
     let (outcome, items) = review(input, select)?;
     ui_model::write_result(&mut io::stdout().lock(), outcome, &items)?;
+    Ok(())
+}
+
+/// Shows the no-results report until closed (or saves a picture of it to `screenshot`).
+fn show_report(report: ReportInput, screenshot_png: Option<&Path>) -> Result<()> {
+    let make = || -> Result<ReportWindow> {
+        let ui = ReportWindow::new()?;
+        ui.set_summary(report.summary.as_str().into());
+        ui.set_report(report.lines.join("\n").into());
+        let weak = ui.as_weak();
+        ui.on_ok(move || {
+            if let Some(ui) = weak.upgrade() {
+                let _ = ui.hide();
+            }
+        });
+        Ok(ui)
+    };
+    if let Some(png) = screenshot_png {
+        return screenshot(png, make, |_| {});
+    }
+    let ui = make()?;
+    win::place(ui.window());
+    ui.run()?;
+    ui_model::write_result(&mut io::stdout().lock(), Outcome::Ok, &[])?;
     Ok(())
 }
 
@@ -294,8 +338,9 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
     Ok(ReviewInput { notes: "Labels: demo. 0 failed, 0 unsupported.".into(), items })
 }
 
-/// Renders the window off screen with the software renderer and saves it as a PNG.
-fn screenshot(input: ReviewInput, select: usize, png: &Path) -> Result<()> {
+/// Renders the window `make` builds off screen with the software renderer and saves it as a
+/// PNG. `frame` runs before each of the few frames drawn.
+fn screenshot<T: ComponentHandle>(png: &Path, make: impl FnOnce() -> Result<T>, frame: impl Fn(&T)) -> Result<()> {
     use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
     use slint::Rgb8Pixel;
     use slint::platform::{Platform, WindowAdapter};
@@ -312,15 +357,14 @@ fn screenshot(input: ReviewInput, select: usize, png: &Path) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("cannot set the off-screen platform: {e}"))?;
     let (w, h) = SCREENSHOT_SIZE;
     window.set_size(slint::PhysicalSize::new(w, h));
-    let (ui, _items, _outcome) = build(input, select, false)?;
+    let ui = make()?;
     ui.show()?;
 
     let mut pixels = vec![Rgb8Pixel::default(); (w * h) as usize];
-    // A few frames: the first lays out the list, which then reports its column count.
-    // `changed` handlers run from the event loop, which this has none of, so pass it on here.
+    // A few frames: the first lays the window out, which later ones may depend on.
     for _ in 0..4 {
         slint::platform::update_timers_and_animations();
-        ui.invoke_columns_changed(ui.get_columns());
+        frame(&ui);
         window.request_redraw();
         window.draw_if_needed(|renderer| {
             renderer.render(&mut pixels, w as usize);

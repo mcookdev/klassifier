@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use klassifier::ui_model::{
-    grid_rows, move_selection, parse_review, place_window, totals, totals_line, unescape, write_result, Item, Label,
-    Move, Outcome, Rect,
+    grid_rows, move_selection, parse_report, parse_review, place_window, totals, totals_line, unescape, write_result,
+    Item, Label, Move, Outcome, Rect,
 };
 
 fn label(name: &str, suggested: bool) -> Label {
@@ -212,4 +212,31 @@ fn moves_with_nothing_or_one_column() {
     assert_eq!(move_selection(0, Move::Down, 4, 0), 0);
     assert_eq!(move_selection(2, Move::Down, 0, 5), 3, "zero columns counts as one");
     assert_eq!(move_selection(7, Move::Left, 4, 5), 3, "an index past the end is clamped to the last photo first");
+}
+
+#[test]
+fn parses_report_input() {
+    let text = "\u{feff}#klassifier-ui\treport\t1\r\n\
+SUMMARY\t0 classified.\\nLabels: General.\r\n\
+LINE\ta.mov: unsupported: video\r\n\
+LINE\t\r\n\
+LINE\tb.ARW: error\twith a tab\n\
+FUTURE\tignored\n";
+    let report = parse_report(text).unwrap();
+    assert_eq!(report.summary, "0 classified.\nLabels: General.");
+    assert_eq!(report.lines, ["a.mov: unsupported: video", "", "b.ARW: error\twith a tab"]);
+}
+
+#[test]
+fn report_needs_its_header() {
+    assert!(parse_report("#klassifier-ui\treview\t1\nLINE\tx\n").is_err(), "a review file");
+    assert!(parse_report("LINE\tx\n").is_err());
+    assert!(parse_review("#klassifier-ui\treport\t1\n").is_err(), "and the other way round");
+}
+
+#[test]
+fn writes_ok_for_the_report() {
+    let mut out = Vec::new();
+    write_result(&mut out, Outcome::Ok, &[]).unwrap();
+    assert_eq!(String::from_utf8(out).unwrap().lines().nth(1), Some("RESULT\tok"));
 }

@@ -1,0 +1,57 @@
+// The report shown when no photo could be classified: the summary, then each photo's
+// error. The lines can be selected and copied. See src/bin/klassifier-ui/main.rs.
+import { Button, TextEdit } from "std-widgets.slint";
+
+export component ReportWindow inherits Window {
+    title: "Classification report";
+    preferred-width: 900px;
+    preferred-height: 600px;
+    min-width: 600px;
+    min-height: 360px;
+    background: #262626;
+    default-font-size: 12px;
+    forward-focus: keys;
+
+    in property <string> summary;
+    // The report lines, joined with line breaks.
+    in property <string> report;
+    callback ok();
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape || event.text == Key.Return) {
+                root.ok();
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 10px;
+            Text {
+                text: root.summary;
+                color: #e0e0e0;
+                wrap: word-wrap;
+            }
+            TextEdit {
+                vertical-stretch: 1;
+                read-only: true;
+                wrap: no-wrap;
+                font-family: "Consolas";
+                font-size: 12px;
+                text: root.report == "" ? "(no photos were read)" : root.report;
+            }
+            HorizontalLayout {
+                alignment: end;
+                Button {
+                    text: "OK";
+                    primary: true;
+                    clicked => {
+                        root.ok();
+                    }
+                }
+            }
+        }
+    }
+}

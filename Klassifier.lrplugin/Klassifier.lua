@@ -66,16 +66,6 @@ local function processChunk(paths, labelArgs, thumbArgs)
 	return rows, backend
 end
 
--- Label shares "dog=0.9213;cat=0.0712" -> "dog 92%, cat 7%"
-local function formatShares(field)
-	local parts = {}
-	for label, share in (field or ''):gmatch('([^;=]+)=([%d.]+)') do
-		local percent = tonumber(share) * 100
-		parts[#parts + 1] = percent < 0.5 and (label .. ' <1%') or string.format('%s %.0f%%', label, percent)
-	end
-	return #parts > 0 and table.concat(parts, ', ') or '(no labels)'
-end
-
 -- "dog;beach" -> { 'dog', 'beach' }
 local function splitList(field)
 	local items = {}
@@ -83,33 +73,14 @@ local function splitList(field)
 	return items
 end
 
--- Suggested keywords "dog;beach" -> "dog, beach"
-local function formatSuggested(field)
-	local labels = splitList(field)
-	return #labels > 0 and table.concat(labels, ', ') or 'none'
-end
-
--- Adds the report lines for one result and updates the counts.
+-- Counts one result's failure, if it failed, and adds its report line (see showReport in
+-- Review.lua; the report only opens when no photo classified).
 local function describe(path, fields, counts, lines)
 	local name = LrPathUtils.leafName(path)
 	if not fields then
 		counts.failed = counts.failed + 1
 		lines[#lines + 1] = name .. ': no result from klassifier'
-	elseif fields[1] == 'OK' then
-		-- OK, path, source, width, height, rotation, ms, flags, labels, shares, match, suggested
-		local source, width, height, ms, flags = fields[3], fields[4], fields[5], fields[7], fields[8]
-		local shares, match, suggested = fields[10], fields[11] or 'unknown', fields[12]
-		counts.loaded = counts.loaded + 1
-		counts[match] = (counts[match] or 0) + 1
-		local heading = string.format('%s  -  %s match    (%sx%s %s, %s ms)', name, match, width, height, source, ms)
-		if flags and flags:find('small', 1, true) then
-			counts.small = counts.small + 1
-			heading = heading .. '  SMALL PREVIEW'
-		end
-		lines[#lines + 1] = heading
-		lines[#lines + 1] = '        ' .. formatShares(shares)
-		lines[#lines + 1] = '        Suggested: ' .. formatSuggested(suggested)
-	else
+	elseif fields[1] ~= 'OK' then
 		local message = fields[3] or 'unknown error'
 		if message:sub(1, 12) == 'unsupported:' then
 			counts.unsupported = counts.unsupported + 1
@@ -244,28 +215,6 @@ local function describeLabels(options)
 	if options.onlyHints then return 'hints only (' .. hints .. ')' end
 	if hints == '' then return options.labelSet .. ' label set' end
 	return options.labelSet .. ' label set + hints (' .. hints .. ')'
-end
-
-local function showReport(summary, lines)
-	local f = LrView.osFactory()
-	LrDialogs.presentModalDialog {
-		title = 'Classification report',
-		contents = f:column {
-			spacing = f:control_spacing(),
-			f:static_text { title = summary, height_in_lines = select(2, summary:gsub('\n', '')) + 1 },
-			f:scrolled_view {
-				width = 720,
-				height = 420,
-				f:static_text {
-					title = table.concat(lines, '\n'),
-					height_in_lines = #lines,
-					width_in_chars = 110,
-				},
-			},
-		},
-		actionVerb = 'OK',
-		cancelVerb = '< exclude >',
-	}
 end
 
 -- The target photos to classify, one entry per file: { path, photos, virtualCopies }.
@@ -409,27 +358,24 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	local results, backend, cancelled = classifyAll(context, paths, labelArgs, thumbs)
 	if not results then return end
 
-	local counts = { loaded = 0, small = 0, failed = 0, unsupported = 0, strong = 0, good = 0, weak = 0 }
+	local counts = { failed = 0, unsupported = 0 }
 	local lines = {}
 	for _, r in ipairs(results) do
 		describe(r.path, r.fields, counts, lines)
 	end
 
-	local summary = string.format(
-		'%d classified: %d strong, %d good, %d weak matches (%d with small previews).\n' ..
-		'%d failed, %d unsupported. Skipped %d video(s), %d duplicate(s). Ran on %s.\n' ..
-		'Labels: %s.\n\n' ..
-		'Percentages are each label\'s share of the photo\'s total score. The match level\n' ..
-		'says how sure the model is about the top label.',
-		counts.loaded, counts.strong, counts.good, counts.weak, counts.small,
-		counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown', describeLabels(options))
-	if cancelled then
-		summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
-	end
-
 	local items = buildItems(entries, results, thumbs)
 	if #items == 0 then
-		showReport(summary, lines)
+		-- Nothing to review: say why instead.
+		local summary = string.format(
+			'No photo could be classified.\n' ..
+			'%d failed, %d unsupported. Skipped %d video(s), %d duplicate(s). Ran on %s.\n' ..
+			'Labels: %s.',
+			counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown', describeLabels(options))
+		if cancelled then
+			summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
+		end
+		Review.showReport(context, summary, lines)
 		return
 	end
 

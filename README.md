@@ -14,8 +14,8 @@ The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
 to the CPU. This small model is only slightly slower on the CPU. On a PC with
 more than one GPU (say a desktop CPU's integrated graphics and a graphics
 card), it uses the one Windows ranks as high-performance, normally the
-graphics card. The report's summary names it ("Ran on DirectML (NVIDIA GeForce
-RTX 4090)").
+graphics card. `Klassifier.log` names it (`backend=DirectML gpu=NVIDIA GeForce
+RTX 4090`), and so does the report shown when no photo could be classified.
 
 For RAW files the app uses the JPEG preview embedded in the file and never
 decodes the raw data. JPEG, PNG, TIFF and WebP files are read directly. Other
@@ -163,7 +163,9 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 - **Cancel** (or Esc), or closing the window, changes nothing. If you changed
   any photo, it asks before throwing the changes away.
 - If no photo could be classified, a report opens instead of the review
-  window: each photo's error, and the summary.
+  window: how many failed or were unsupported or skipped, what it ran on, the
+  label set, and each photo's error. The errors can be selected and copied
+  (Ctrl+C). OK, Enter or Esc closes it.
 - **About** shows the Slint attribution its license asks for.
 - While Classify Photos is running or its review is open, starting it again
   says so instead of opening a second one.
