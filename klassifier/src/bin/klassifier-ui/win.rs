@@ -8,23 +8,44 @@ use crate::ui_model::{Geometry, Rect};
 #[cfg(windows)]
 const MIN_SIZE: (f32, f32) = (900.0, 600.0);
 
+/// How big a window is.
+#[derive(Clone, Copy)]
+pub enum Fit {
+    /// Resizable: 80% of Lightroom's window, at least MIN_SIZE, or as the user left it.
+    Large,
+    /// A dialog that sizes itself: this many logical pixels, whatever was saved.
+    Fixed(f32, f32),
+}
+
 /// Sizes and places `ui`'s window before it is shown: at `saved` (where it was last closed)
 /// if that is on a monitor, else over Lightroom.
-pub fn place<T: slint::ComponentHandle + 'static>(ui: &T, saved: Option<Geometry>) {
+pub fn place<T: slint::ComponentHandle + 'static>(ui: &T, saved: Option<Geometry>, fit: Fit) {
     #[cfg(windows)]
     {
+        use crate::ui_model::{center_window, place_window, restore_window};
         let window = ui.window();
-        let min = |scale: f32| ((MIN_SIZE.0 * scale) as i32, (MIN_SIZE.1 * scale) as i32);
+        let px = |(w, h): (f32, f32), scale: f32| ((w * scale) as i32, (h * scale) as i32);
         let restored = saved.and_then(|saved| {
             let (work, scale) = imp::monitor_of(saved.rect)?;
-            Some((crate::ui_model::restore_window(saved.rect, work, min(scale)), saved.maximized))
+            Some(match fit {
+                Fit::Large => (restore_window(saved.rect, work, px(MIN_SIZE, scale)), saved.maximized),
+                Fit::Fixed(w, h) => {
+                    let (w, h) = px((w, h), scale);
+                    (restore_window(Rect { w, h, ..saved.rect }, work, (w, h)), false)
+                }
+            })
         });
         let placed = restored.or_else(|| {
             let (target, work, scale) = imp::lightroom_window()?;
-            Some((crate::ui_model::place_window(target, work, min(scale)), false))
+            Some(match fit {
+                Fit::Large => (place_window(target, work, px(MIN_SIZE, scale)), false),
+                Fit::Fixed(w, h) => (center_window(target, work, px((w, h), scale)), false),
+            })
         });
         if let Some((r, maximized)) = placed {
-            window.set_size(slint::PhysicalSize::new(r.w as u32, r.h as u32));
+            if let Fit::Large = fit {
+                window.set_size(slint::PhysicalSize::new(r.w as u32, r.h as u32));
+            }
             window.set_position(slint::PhysicalPosition::new(r.x, r.y));
             if maximized {
                 // Once the window exists: before that there is nothing to maximize.
@@ -38,7 +59,16 @@ pub fn place<T: slint::ComponentHandle + 'static>(ui: &T, saved: Option<Geometry
         }
     }
     #[cfg(not(windows))]
-    let _ = (ui, saved);
+    let _ = (ui, saved, fit);
+}
+
+/// Makes the native menus (the label set list) dark, to match the windows. Call before any
+/// menu is shown. Windows has no documented switch for this; uxtheme.dll's
+/// SetPreferredAppMode (ordinal 135) and FlushMenuThemes (136), present since Windows 10
+/// 1903, are what other apps use. Without them (older Windows) the menus stay light.
+pub fn dark_menus() {
+    #[cfg(windows)]
+    imp::dark_menus();
 }
 
 /// Where `window` is now, to open there next time; None if it is minimized.
@@ -65,11 +95,31 @@ mod imp {
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
+    use windows::core::{w, PCSTR};
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
     use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
         GW_OWNER,
     };
+
+    pub fn dark_menus() {
+        const FORCE_DARK: i32 = 2;
+        unsafe {
+            let Ok(uxtheme) = LoadLibraryExW(w!("uxtheme.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) else { return };
+            // By ordinal: these functions have no exported names.
+            let (Some(set_mode), Some(flush)) = (
+                GetProcAddress(uxtheme, PCSTR(135 as *const u8)),
+                GetProcAddress(uxtheme, PCSTR(136 as *const u8)),
+            ) else {
+                return;
+            };
+            let set_mode: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(set_mode);
+            let flush: unsafe extern "system" fn() = std::mem::transmute(flush);
+            set_mode(FORCE_DARK);
+            flush();
+        }
+    }
 
     /// Lightroom's main window (else the foreground window): its rectangle, its monitor's
     /// work area, and its display scale.

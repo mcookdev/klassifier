@@ -1,0 +1,189 @@
+// The Classify Photos options: label set, hints, and whether to use only the hints. The
+// entry is checked as it is typed; Classify stays disabled while there is a problem.
+// See src/bin/klassifier-ui/main.rs.
+import { Button, CheckBox, LineEdit } from "std-widgets.slint";
+
+// A dropdown for the label sets. Its list is a native Windows menu, which (unlike Slint's
+// ComboBox popup) can extend past the dialog: the dialog is too short for a long list.
+component SetPicker inherits Rectangle {
+    in property <[string]> sets;
+    in-out property <int> index;
+    in property <bool> enabled: true;
+    min-height: 32px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.enabled ? #4a4a4a : #383838;
+    background: !root.enabled ? #262626 : touch.has-hover ? #383838 : #2d2d2d;
+
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 11px;
+        spacing: 8px;
+        Text {
+            text: root.sets[root.index];
+            color: root.enabled ? #e6e6e6 : #6e6e6e;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 12px;
+                height: 7px;
+                viewbox-width: 12;
+                viewbox-height: 7;
+                commands: "M 1 1 L 6 6 L 11 1";
+                stroke: root.enabled ? #c8c8c8 : #5a5a5a;
+                stroke-width: 1.2px;
+                fill: transparent;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            menu.show({ x: 0, y: root.height });
+        }
+    }
+
+    menu := ContextMenuArea {
+        enabled: root.enabled;
+        Menu {
+            // No tick on the current set: Windows only draws one on checkable items, which
+            // tick themselves when chosen. The box shows the current set.
+            for name[i] in root.sets: MenuItem {
+                title: name;
+                activated => {
+                    root.index = i;
+                }
+            }
+        }
+    }
+}
+
+export component OptionsWindow inherits Window {
+    title: "Classify Photos";
+    // Fixed size: as wide as this, as tall as the contents.
+    width: 560px;
+    height: root.natural-height;
+    background: #262626;
+    default-font-size: 12px;
+    forward-focus: hints-edit;
+
+    in property <[string]> sets;
+    in-out property <int> set-index;
+    in-out property <string> hints <=> hints-edit.text;
+    in-out property <bool> only-hints <=> only.checked;
+    // Photos to classify, and above how many to warn that it takes a while (0: never).
+    in property <int> count;
+    in property <int> warn-above;
+    out property <length> natural-height: layout.preferred-height;
+    // Why the entry can't be used, or "" (options_problem in ui_model.rs).
+    pure callback problem-with(string, bool) -> string;
+    out property <string> problem: root.problem-with(root.hints, root.only-hints);
+    callback classify();
+    callback cancel();
+
+    function try-classify() {
+        if (root.problem == "") {
+            root.classify();
+        }
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.cancel();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.try-classify();
+                return accept;
+            }
+            return reject;
+        }
+
+        layout := VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+            GridLayout {
+                spacing: 8px;
+                Row {
+                    Text {
+                        text: "Label set:";
+                        color: #d0d0d0;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
+                    SetPicker {
+                        horizontal-stretch: 1;
+                        sets: root.sets;
+                        index <=> root.set-index;
+                        enabled: !root.only-hints;
+                    }
+                }
+                Row {
+                    Text {
+                        text: "Hints:";
+                        color: #d0d0d0;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
+                    hints-edit := LineEdit {
+                        horizontal-stretch: 1;
+                        placeholder-text: "makeup, hair styling, backstage";
+                        accepted => {
+                            root.try-classify();
+                        }
+                    }
+                }
+                Row {
+                    Rectangle { }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: "Extra labels for this run, separated by commas.";
+                        color: #9a9a9a;
+                        wrap: word-wrap;
+                    }
+                }
+                Row {
+                    Rectangle { }
+                    only := CheckBox {
+                        horizontal-stretch: 1;
+                        text: "Use only the hints, not the label set";
+                    }
+                }
+            }
+            if root.warn-above > 0 && root.count > root.warn-above: Text {
+                text: "\{root.count} photos can take a while. You can cancel from the progress bar.";
+                color: #b4b4b4;
+                wrap: word-wrap;
+            }
+            if root.problem != "": Text {
+                text: root.problem;
+                color: #e8b85a;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                Button {
+                    text: "Cancel";
+                    clicked => {
+                        root.cancel();
+                    }
+                }
+                Button {
+                    text: root.count == 1 ? "Classify 1 photo" : "Classify \{root.count} photos";
+                    primary: true;
+                    enabled: root.problem == "";
+                    clicked => {
+                        root.try-classify();
+                    }
+                }
+            }
+        }
+    }
+}

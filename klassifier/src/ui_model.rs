@@ -39,6 +39,22 @@
 //!
 //! and writes `RESULT<TAB>ok` and a WINDOW line when closed.
 //!
+//! The options dialog (`--options`) reads:
+//!
+//! ```text
+//! #klassifier-ui<TAB>options<TAB>1
+//! WINDOW<TAB>...               (optional, as for the review)
+//! COUNT<TAB><photos to classify>
+//! WARN_ABOVE<TAB><n>           (optional: above n photos, warn that it takes a while)
+//! SET<TAB><label set>          (one per label set, in menu order)
+//! LABELSET<TAB><name>          (optional: the set chosen last time)
+//! HINTS<TAB><text, escaped as NOTES>
+//! ONLYHINTS<TAB><0|1>
+//! ```
+//!
+//! and writes RESULT ok|cancel, and for ok the LABELSET, HINTS and ONLYHINTS chosen, plus a
+//! WINDOW line.
+//!
 //! Lines starting with `#` are informational. Readers ignore unknown lines and extra fields.
 
 use std::io::{self, Write};
@@ -190,6 +206,12 @@ pub fn totals_line(items: &[Item]) -> String {
     }
 }
 
+/// One field that keeps its line breaks: backslash -> `\\`, line break -> `\n`, tab -> space
+/// (as `Exec.escape` in the plugin).
+pub fn escape(s: &str) -> String {
+    s.replace('\r', "").replace('\\', "\\\\").replace('\n', "\\n").replace('\t', " ")
+}
+
 /// `\n` -> line break, `\\` -> backslash; any other backslash is kept as is.
 pub fn unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -304,6 +326,86 @@ pub fn parse_report(text: &str) -> Result<ReportInput> {
 }
 
 /// The window's output: `outcome`, the edited `items`' choices, and where the window was.
+#[derive(Debug, Default, PartialEq)]
+pub struct OptionsInput {
+    pub count: usize,
+    pub warn_above: usize,
+    pub sets: Vec<String>,
+    /// The remembered label set's position in `sets` (0 if it is gone).
+    pub set_index: usize,
+    pub hints: String,
+    pub only_hints: bool,
+    pub window: Option<Geometry>,
+}
+
+pub fn parse_options(text: &str) -> Result<OptionsInput> {
+    let mut input = OptionsInput::default();
+    let (mut count, mut label_set) = (None, None);
+    for (n, line) in body(text, "options")? {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let value = fields.get(1).copied().unwrap_or("");
+        match fields[0] {
+            "WINDOW" => input.window = parse_window(&fields[1..]),
+            "COUNT" => count = Some(number(value, "the photo count", n)?),
+            "WARN_ABOVE" => input.warn_above = number(value, "WARN_ABOVE", n)?,
+            "SET" => input.sets.push(value.to_string()),
+            "LABELSET" => label_set = Some(value.to_string()),
+            "HINTS" => input.hints = unescape(value),
+            "ONLYHINTS" => input.only_hints = flag(value, "ONLYHINTS", n)?,
+            _ => {}
+        }
+    }
+    input.count = count.context("no COUNT line")?;
+    if input.sets.is_empty() {
+        bail!("no label sets (SET lines)");
+    }
+    input.set_index = label_set.and_then(|name| input.sets.iter().position(|s| *s == name)).unwrap_or(0);
+    Ok(input)
+}
+
+/// "makeup, hair styling,,backstage" -> ["makeup", "hair styling", "backstage"], as
+/// `parseHints` in the plugin: commas, semicolons and line breaks separate hints.
+pub fn parse_hints(text: &str) -> Vec<&str> {
+    text.split([',', ';', '\r', '\n']).map(str::trim).filter(|h| !h.is_empty()).collect()
+}
+
+/// Why the options can't be used, as the plugin would say, or None if they can.
+pub fn options_problem(hints: &str, only_hints: bool) -> Option<String> {
+    let hints = parse_hints(hints);
+    if only_hints && hints.is_empty() {
+        return Some("Enter at least one hint, or untick \"Use only the hints\".".into());
+    }
+    // The hints file is read like a label set, so "=>" would map a hint to a nested keyword.
+    hints.iter().find(|h| h.contains("=>")).map(|h| {
+        format!("Hints can't map to nested keywords: remove \"=>\" from \"{h}\". Put mappings in a label set file instead.")
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionsChoice {
+    pub label_set: String,
+    pub hints: String,
+    pub only_hints: bool,
+}
+
+/// The options dialog's output: `outcome` (Ok or Cancel), what was chosen, where it was.
+pub fn write_options_result(
+    out: &mut impl Write,
+    outcome: Outcome,
+    choice: Option<&OptionsChoice>,
+    window: Option<Geometry>,
+) -> io::Result<()> {
+    writeln!(out, "#klassifier-ui\t{}", env!("CARGO_PKG_VERSION"))?;
+    writeln!(out, "RESULT\t{}", outcome.as_str())?;
+    if let Some(choice) = choice {
+        writeln!(out, "LABELSET\t{}", choice.label_set.replace(['\t', '\r', '\n'], " "))?;
+        writeln!(out, "HINTS\t{}", escape(&choice.hints))?;
+        writeln!(out, "ONLYHINTS\t{}", u8::from(choice.only_hints))?;
+    }
+    write_window(out, window)?;
+    out.flush()
+}
+
 pub fn write_result(out: &mut impl Write, outcome: Outcome, items: &[Item], window: Option<Geometry>) -> io::Result<()> {
     writeln!(out, "#klassifier-ui\t{}", env!("CARGO_PKG_VERSION"))?;
     writeln!(out, "RESULT\t{}", outcome.as_str())?;
@@ -388,8 +490,12 @@ pub fn restore_window(saved: Rect, work: Rect, min: (i32, i32)) -> Rect {
 /// Where the review window opens: 80% of Lightroom's window `target` but at least `min`,
 /// centred on it, and kept inside the monitor's work area `work`.
 pub fn place_window(target: Rect, work: Rect, min: (i32, i32)) -> Rect {
-    let w = (target.w * 4 / 5).max(min.0).min(work.w);
-    let h = (target.h * 4 / 5).max(min.1).min(work.h);
+    center_window(target, work, ((target.w * 4 / 5).max(min.0), (target.h * 4 / 5).max(min.1)))
+}
+
+/// A window of `size` (at most the work area `work`) centred on `target`, kept inside `work`.
+pub fn center_window(target: Rect, work: Rect, size: (i32, i32)) -> Rect {
+    let (w, h) = (size.0.min(work.w), size.1.min(work.h));
     let x = (target.x + (target.w - w) / 2).clamp(work.x, work.x + work.w - w);
     let y = (target.y + (target.h - h) / 2).clamp(work.y, work.y + work.h - h);
     Rect { x, y, w, h }

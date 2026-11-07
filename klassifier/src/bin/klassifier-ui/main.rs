@@ -1,7 +1,7 @@
-//! klassifier-ui: the plugin's windows. The review window reads the photos and their
-//! suggested keywords from a file written by the plugin, shows them, and prints what the user
-//! decided; the report window shows why no photo could be classified. The exchange formats
-//! are described in `klassifier::ui_model`.
+//! klassifier-ui: the plugin's windows. The options dialog asks what to classify with; the
+//! review window reads the photos and their suggested keywords from a file written by the
+//! plugin, shows them, and prints what the user decided; the report window shows why no photo
+//! could be classified. The exchange formats are described in `klassifier::ui_model`.
 #![windows_subsystem = "windows"]
 
 mod grid;
@@ -23,14 +23,19 @@ use std::rc::Rc;
 
 use anyhow::{bail, Context, Result};
 use slint::platform::Key;
-use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString};
-use ui_model::{move_selection, Geometry, Item, Label, Move, Outcome, ReportInput, ReviewInput};
+use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use ui_model::{
+    move_selection, Geometry, Item, Label, Move, OptionsChoice, OptionsInput, Outcome, ReportInput, ReviewInput,
+};
+use win::Fit;
 
 const USAGE: &str = "\
-Usage: klassifier-ui --review --in <file>
+Usage: klassifier-ui --options --in <file>
+       klassifier-ui --review --in <file>
        klassifier-ui --report --in <file>
        klassifier-ui --demo <folder> [--count <n>] [--select <n>] [--screenshot <png>]
 
+  --options --in <file> Ask for the Classify Photos options set out in <file>
   --review --in <file>  Review the photos in <file> (written by the plugin)
   --report --in <file>  Show the report in <file> (written by the plugin)
   --demo <folder>       Review the JPEGs in <folder> with made-up labels (for development);
@@ -41,6 +46,9 @@ Usage: klassifier-ui --review --in <file>
 /// Screenshot size, in pixels at scale 1.
 const SCREENSHOT_SIZE: (u32, u32) = (1200, 800);
 
+/// The options dialog's width, in logical pixels: `width` in ui/options.slint.
+const OPTIONS_WIDTH: f32 = 560.0;
+
 struct Args {
     input: Input,
     /// The photo selected first, from 0.
@@ -49,6 +57,7 @@ struct Args {
 }
 
 enum Input {
+    Options(PathBuf),
     Review(PathBuf),
     Report(PathBuf),
     Demo(PathBuf, usize),
@@ -65,11 +74,13 @@ fn main() -> ExitCode {
 }
 
 fn parse_args() -> Result<Args> {
-    let (mut review, mut report, mut file, mut demo, mut count, mut screenshot) = (false, false, None, None, None, None);
+    let (mut options, mut review, mut report) = (false, false, false);
+    let (mut file, mut demo, mut count, mut screenshot) = (None, None, None, None);
     let mut select = 0;
     let mut it = std::env::args_os().skip(1);
     while let Some(arg) = it.next() {
         match arg.to_str() {
+            Some("--options") => options = true,
             Some("--review") => review = true,
             Some("--report") => report = true,
             Some("--in") => file = Some(PathBuf::from(it.next().context("--in needs a file")?)),
@@ -94,11 +105,12 @@ fn parse_args() -> Result<Args> {
             _ => bail!("unknown argument {}\n\n{USAGE}", arg.to_string_lossy()),
         }
     }
-    let input = match (review, report, file, demo) {
-        (true, false, Some(file), None) => Input::Review(file),
-        (false, true, Some(file), None) => Input::Report(file),
-        (false, false, None, Some(dir)) => Input::Demo(dir, count.unwrap_or(0)),
-        _ => bail!("give --review --in <file>, --report --in <file>, or --demo <folder>\n\n{USAGE}"),
+    let input = match (options, review, report, file, demo) {
+        (true, false, false, Some(file), None) => Input::Options(file),
+        (false, true, false, Some(file), None) => Input::Review(file),
+        (false, false, true, Some(file), None) => Input::Report(file),
+        (false, false, false, None, Some(dir)) => Input::Demo(dir, count.unwrap_or(0)),
+        _ => bail!("give --options, --review or --report with --in <file>, or --demo <folder>\n\n{USAGE}"),
     };
     Ok(Args { input, select, screenshot })
 }
@@ -109,9 +121,15 @@ fn read(file: &Path) -> Result<String> {
 
 fn run() -> Result<()> {
     let args = parse_args()?;
+    win::dark_menus();
     let input = match &args.input {
         Input::Review(file) => {
             ui_model::parse_review(&read(file)?).with_context(|| format!("cannot read {}", file.display()))?
+        }
+        Input::Options(file) => {
+            let options =
+                ui_model::parse_options(&read(file)?).with_context(|| format!("cannot read {}", file.display()))?;
+            return show_options(options, args.screenshot.as_deref());
         }
         Input::Report(file) => {
             let report =
@@ -130,6 +148,7 @@ fn run() -> Result<()> {
         return screenshot(
             png,
             || Ok(build(input, select, false)?.0),
+            |_| SCREENSHOT_SIZE,
             |ui: &ReviewWindow| ui.invoke_columns_changed(ui.get_columns()),
         );
     }
@@ -162,10 +181,10 @@ fn show_report(report: ReportInput, screenshot_png: Option<&Path>) -> Result<()>
         Ok(ui)
     };
     if let Some(png) = screenshot_png {
-        return screenshot(png, make, |_| {});
+        return screenshot(png, make, |_| SCREENSHOT_SIZE, |_| {});
     }
     let ui = make()?;
-    win::place(&ui, report.window);
+    win::place(&ui, report.window, Fit::Large);
     ui.run()?;
     ui_model::write_result(&mut io::stdout().lock(), Outcome::Ok, &[], closed_at.get())?;
     Ok(())
@@ -313,7 +332,7 @@ fn review(input: ReviewInput, select: usize) -> Result<(Closed, Vec<Item>)> {
         }
         None => CloseRequestResponse::HideWindow,
     });
-    win::place(&ui, saved);
+    win::place(&ui, saved, Fit::Large);
     ui.run()?;
     let items = items.borrow().clone();
     Ok((closed.get(), items))
@@ -359,9 +378,71 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
     Ok(ReviewInput { notes: "Labels: demo. 0 failed, 0 unsupported.".into(), items, window: None })
 }
 
-/// Renders the window `make` builds off screen with the software renderer and saves it as a
-/// PNG. `frame` runs before each of the few frames drawn.
-fn screenshot<T: ComponentHandle>(png: &Path, make: impl FnOnce() -> Result<T>, frame: impl Fn(&T)) -> Result<()> {
+/// Asks for the options until the user classifies or cancels (or saves a picture of the
+/// dialog to `screenshot`).
+fn show_options(input: OptionsInput, screenshot_png: Option<&Path>) -> Result<()> {
+    type Closed = (Outcome, Option<OptionsChoice>, Option<Geometry>);
+    let closed: Rc<RefCell<Closed>> = Rc::new(RefCell::new((Outcome::Cancel, None, None)));
+    let make = || -> Result<OptionsWindow> {
+        let ui = OptionsWindow::new()?;
+        let names: Vec<SharedString> = input.sets.iter().map(|s| s.as_str().into()).collect();
+        ui.set_sets(ModelRc::new(VecModel::from(names)));
+        ui.set_set_index(input.set_index as i32);
+        ui.set_hints(input.hints.as_str().into());
+        ui.set_only_hints(input.only_hints);
+        ui.set_count(input.count as i32);
+        ui.set_warn_above(input.warn_above as i32);
+        ui.on_problem_with(|hints, only| ui_model::options_problem(&hints, only).unwrap_or_default().into());
+
+        let (weak, c, sets) = (ui.as_weak(), closed.clone(), input.sets.clone());
+        ui.on_classify(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let (hints, only_hints) = (ui.get_hints().to_string(), ui.get_only_hints());
+            if ui_model::options_problem(&hints, only_hints).is_some() {
+                return;
+            }
+            let label_set = sets.get(ui.get_set_index().max(0) as usize).unwrap_or(&sets[0]).clone();
+            *c.borrow_mut() = (Outcome::Ok, Some(OptionsChoice { label_set, hints, only_hints }), win::geometry(ui.window()));
+            let _ = ui.hide();
+        });
+        let (weak, c) = (ui.as_weak(), closed.clone());
+        ui.on_cancel(move || {
+            if let Some(ui) = weak.upgrade() {
+                *c.borrow_mut() = (Outcome::Cancel, None, win::geometry(ui.window()));
+                let _ = ui.hide();
+            }
+        });
+        let (weak, c) = (ui.as_weak(), closed.clone());
+        ui.window().on_close_requested(move || {
+            if let Some(ui) = weak.upgrade() {
+                *c.borrow_mut() = (Outcome::Cancel, None, win::geometry(ui.window()));
+            }
+            CloseRequestResponse::HideWindow
+        });
+        Ok(ui)
+    };
+    let natural = |ui: &OptionsWindow| (OPTIONS_WIDTH, ui.get_natural_height());
+    if let Some(png) = screenshot_png {
+        return screenshot(png, make, |ui| (natural(ui).0 as u32, natural(ui).1.ceil() as u32), |_| {});
+    }
+    let ui = make()?;
+    let (w, h) = natural(&ui);
+    // Measured before the window is shown, text a little short: off centre by a few pixels.
+    win::place(&ui, input.window, Fit::Fixed(w, h));
+    ui.run()?;
+    let (outcome, choice, window) = closed.borrow().clone();
+    ui_model::write_options_result(&mut io::stdout().lock(), outcome, choice.as_ref(), window)?;
+    Ok(())
+}
+
+/// Renders the window `make` builds off screen with the software renderer, `size` pixels at
+/// scale 1, and saves it as a PNG. `frame` runs before each of the few frames drawn.
+fn screenshot<T: ComponentHandle>(
+    png: &Path,
+    make: impl FnOnce() -> Result<T>,
+    size: impl Fn(&T) -> (u32, u32),
+    frame: impl Fn(&T),
+) -> Result<()> {
     use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
     use slint::Rgb8Pixel;
     use slint::platform::{Platform, WindowAdapter};
@@ -380,12 +461,16 @@ fn screenshot<T: ComponentHandle>(png: &Path, make: impl FnOnce() -> Result<T>, 
     window.set_size(slint::PhysicalSize::new(w, h));
     let ui = make()?;
     ui.show()?;
-
-    let mut pixels = vec![Rgb8Pixel::default(); (w * h) as usize];
-    // A few frames: the first lays the window out, which later ones may depend on.
+    // A few frames: the first lays the window out, which later ones may depend on, and its
+    // size (text can only be measured once the window is shown).
+    let mut pixels = Vec::new();
+    let (mut w, mut h) = (w, h);
     for _ in 0..4 {
         slint::platform::update_timers_and_animations();
         frame(&ui);
+        (w, h) = size(&ui);
+        window.set_size(slint::PhysicalSize::new(w, h));
+        pixels.resize((w * h) as usize, Rgb8Pixel::default());
         window.request_redraw();
         window.draw_if_needed(|renderer| {
             renderer.render(&mut pixels, w as usize);

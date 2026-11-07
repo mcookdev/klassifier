@@ -4,8 +4,9 @@
 use std::path::PathBuf;
 
 use klassifier::ui_model::{
-    grid_rows, move_selection, parse_report, parse_review, place_window, restore_window, totals, totals_line, unescape,
-    write_result, Geometry, Item, Label, Move, Outcome, Rect,
+    center_window, escape, grid_rows, move_selection, options_problem, parse_hints, parse_options, parse_report,
+    parse_review, place_window, restore_window, totals, totals_line, unescape, write_options_result, write_result,
+    Geometry, Item, Label, Move, OptionsChoice, Outcome, Rect,
 };
 
 fn label(name: &str, suggested: bool) -> Label {
@@ -285,4 +286,84 @@ fn restored_window_kept_on_its_monitor() {
     // Too small or too big: at least the minimum, at most the monitor.
     assert_eq!(restore_window(Rect { x: 2000, y: 100, w: 300, h: 200 }, work, min), Rect { x: 2000, y: 100, w: 900, h: 600 });
     assert_eq!(restore_window(Rect { x: 1800, y: -50, w: 4000, h: 3000 }, work, min), work);
+}
+
+const OPTIONS: &str = "#klassifier-ui\toptions\t1\n\
+WINDOW\t100\t200\t560\t300\t0\n\
+COUNT\t812\n\
+WARN_ABOVE\t500\n\
+SET\tGeneral\n\
+SET\tFashion\n\
+SET\tWildlife\n\
+LABELSET\tFashion\n\
+HINTS\tmakeup, hair styling\\nbackstage\n\
+ONLYHINTS\t1\n";
+
+#[test]
+fn parses_options_input() {
+    let input = parse_options(OPTIONS).unwrap();
+    assert_eq!(input.count, 812);
+    assert_eq!(input.warn_above, 500);
+    assert_eq!(input.sets, ["General", "Fashion", "Wildlife"]);
+    assert_eq!(input.set_index, 1);
+    assert_eq!(input.hints, "makeup, hair styling\nbackstage");
+    assert!(input.only_hints);
+    assert_eq!(input.window.unwrap().rect, Rect { x: 100, y: 200, w: 560, h: 300 });
+}
+
+#[test]
+fn options_need_sets_and_a_count() {
+    let header = "#klassifier-ui\toptions\t1\n";
+    assert!(parse_options(&format!("{header}COUNT\t3\n")).is_err(), "no label sets");
+    assert!(parse_options(&format!("{header}SET\tGeneral\n")).is_err(), "no count");
+    assert!(parse_options(&format!("{header}COUNT\tmany\nSET\tGeneral\n")).is_err(), "bad count");
+    // An unknown remembered set (deleted since) falls back to the first one.
+    let input = parse_options(&format!("{header}COUNT\t3\nSET\tGeneral\nSET\tFashion\nLABELSET\tGone\n")).unwrap();
+    assert_eq!((input.set_index, input.hints.as_str(), input.only_hints, input.warn_above), (0, "", false, 0));
+}
+
+#[test]
+fn hints_split_like_parse_hints_in_lua() {
+    assert_eq!(parse_hints("makeup, hair styling,,backstage"), ["makeup", "hair styling", "backstage"]);
+    assert_eq!(parse_hints(" a ;b\r\n c\n,"), ["a", "b", "c"]);
+    assert!(parse_hints(" , ;").is_empty());
+}
+
+#[test]
+fn options_problems_match_lua() {
+    assert_eq!(options_problem("", false), None);
+    assert_eq!(options_problem("dog", true), None);
+    assert_eq!(options_problem(" , ", true).as_deref(), Some("Enter at least one hint, or untick \"Use only the hints\"."));
+    assert_eq!(
+        options_problem("cat, egret => Wildlife > Bird", false).as_deref(),
+        Some("Hints can't map to nested keywords: remove \"=>\" from \"egret => Wildlife > Bird\". Put mappings in a label set file instead.")
+    );
+}
+
+#[test]
+fn escape_is_undone_by_unescape() {
+    for s in ["plain", "two\nlines", "C:\\dir\\", "a\\nb (a backslash, then n)"] {
+        assert_eq!(unescape(&escape(s)), s.replace('\t', " "));
+    }
+    assert_eq!(escape("a\tb\r\nc"), "a b\\nc");
+}
+
+#[test]
+fn writes_the_options_chosen() {
+    let choice = OptionsChoice { label_set: "Fashion".into(), hints: "a,\nb".into(), only_hints: false };
+    let mut out = Vec::new();
+    write_options_result(&mut out, Outcome::Ok, Some(&choice), None).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert_eq!(&text.lines().collect::<Vec<_>>()[1..], ["RESULT\tok", "LABELSET\tFashion", "HINTS\ta,\\nb", "ONLYHINTS\t0"]);
+    let mut out = Vec::new();
+    write_options_result(&mut out, Outcome::Cancel, None, None).unwrap();
+    assert_eq!(&String::from_utf8(out).unwrap().lines().collect::<Vec<_>>()[1..], ["RESULT\tcancel"]);
+}
+
+#[test]
+fn dialog_centred_at_its_size() {
+    let work = Rect { x: 0, y: 0, w: 2560, h: 1400 };
+    assert_eq!(center_window(Rect { x: 0, y: 0, w: 2560, h: 1400 }, work, (560, 300)), Rect { x: 1000, y: 550, w: 560, h: 300 });
+    // Over a Lightroom window near the edge: kept on screen.
+    assert_eq!(center_window(Rect { x: 2400, y: 0, w: 400, h: 300 }, work, (560, 300)), Rect { x: 2000, y: 0, w: 560, h: 300 });
 }

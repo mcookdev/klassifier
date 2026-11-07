@@ -1,24 +1,22 @@
 --[[----------------------------------------------------------------------------
   Klassifier.lua
-  Asks for a label set and optional hints, runs klassifier.exe on the targeted
-  photos in chunks, and opens the review window (Review.lua) with the keywords
+  Asks for a label set and optional hints (Options.lua), runs klassifier.exe on the
+  targeted photos in chunks, and opens the review window (Review.lua) with the keywords
   it suggests for each one. Accept All writes them (Keywords.lua). Thumbnails for
   the review are made along the way (Thumbs.lua).
 ------------------------------------------------------------------------------]]
 
 local LrApplication     = import 'LrApplication'
-local LrBinding         = import 'LrBinding'
 local LrDialogs         = import 'LrDialogs'
 local LrFileUtils       = import 'LrFileUtils'
 local LrFunctionContext = import 'LrFunctionContext'
 local LrLogger          = import 'LrLogger'
 local LrPathUtils       = import 'LrPathUtils'
-local LrPrefs           = import 'LrPrefs'
 local LrProgressScope   = import 'LrProgressScope'
-local LrView            = import 'LrView'
 
 local Exec     = require 'Exec'
 local Keywords = require 'Keywords'
+local Options  = require 'Options'
 local Review   = require 'Review'
 local Thumbs   = require 'Thumbs'
 
@@ -29,11 +27,6 @@ logger:enable('logfile') -- writes to Klassifier.log in the Lightroom logs folde
 local CHUNK_SIZE = 100
 -- Labels reported per photo: the candidates offered for review.
 local TOP_LABELS = 10
--- Warn in the options dialog above this many photos (e.g. a whole filmstrip with nothing selected).
-local WARN_ABOVE = 500
--- Label sets are the .txt files in this folder inside the plugin.
-local LABEL_SET_DIR = 'label-sets'
-local DEFAULT_LABEL_SET = 'General'
 
 -- Runs the app on one chunk of paths. `labelArgs` are the --labels options, `thumbArgs` the
 -- --thumbs ones. Returns a table of path -> row fields plus what it ran on ("DirectML (<GPU
@@ -91,114 +84,12 @@ local function describe(path, fields, counts, lines)
 	end
 end
 
--- Names of the label sets (the .txt files in LABEL_SET_DIR), the default first.
-local function listLabelSets()
-	local names = {}
-	for file in LrFileUtils.files(LrPathUtils.child(_PLUGIN.path, LABEL_SET_DIR)) do
-		local leaf = LrPathUtils.leafName(file)
-		if leaf:lower():match('%.txt$') then
-			names[#names + 1] = LrPathUtils.removeExtension(leaf)
-		end
-	end
-	table.sort(names, function(a, b)
-		if a == DEFAULT_LABEL_SET or b == DEFAULT_LABEL_SET then return a == DEFAULT_LABEL_SET end
-		return a:lower() < b:lower()
-	end)
-	return names
-end
-
--- "makeup, hair styling,,backstage" -> { 'makeup', 'hair styling', 'backstage' }
-local function parseHints(text)
-	local hints = {}
-	for hint in (text or ''):gmatch('[^,;\r\n]+') do
-		hint = hint:match('^%s*(.-)%s*$')
-		if hint ~= '' then hints[#hints + 1] = hint end
-	end
-	return hints
-end
-
--- Shows the options dialog. Returns { labelSet, hints, onlyHints }, or nil if cancelled.
--- The choices are remembered for next time.
-local function askOptions(context, photoCount)
-	local prefs = LrPrefs.prefsForPlugin()
-	local sets = listLabelSets()
-	if #sets == 0 then
-		LrDialogs.message('Classify Photos', 'No label sets found in the plugin\'s ' .. LABEL_SET_DIR .. ' folder.', 'critical')
-		return nil
-	end
-
-	local props = LrBinding.makePropertyTable(context)
-	props.labelSet = sets[1]
-	for _, name in ipairs(sets) do
-		if name == prefs.labelSet then props.labelSet = name end
-	end
-	props.hints = prefs.hints or ''
-	props.onlyHints = prefs.onlyHints or false
-
-	local f = LrView.osFactory()
-	local bind = LrView.bind
-	local labelWidth = LrView.share 'label_width'
-	local items = {}
-	for _, name in ipairs(sets) do items[#items + 1] = { title = name, value = name } end
-
-	local rows = {
-		bind_to_object = props,
-		spacing = f:control_spacing(),
-		f:row {
-			f:static_text { title = 'Label set:', alignment = 'right', width = labelWidth },
-			f:popup_menu { items = items, value = bind 'labelSet', enabled = LrBinding.negativeOfKey 'onlyHints' },
-		},
-		f:row {
-			f:static_text { title = 'Hints:', alignment = 'right', width = labelWidth },
-			f:edit_field { value = bind 'hints', width_in_chars = 45, immediate = true },
-		},
-		f:row {
-			f:spacer { width = labelWidth },
-			f:static_text { title = 'Extra labels for this run, separated by commas,\ne.g. makeup, hair styling, backstage', height_in_lines = 2 },
-		},
-		f:row {
-			f:spacer { width = labelWidth },
-			f:checkbox { title = 'Use only the hints, not the label set', value = bind 'onlyHints' },
-		},
-	}
-	if photoCount > WARN_ABOVE then
-		rows[#rows + 1] = f:static_text {
-			title = string.format('%d photos can take a while. You can cancel from the progress bar.', photoCount),
-		}
-	end
-
-	local result = LrDialogs.presentModalDialog {
-		title = 'Classify Photos',
-		contents = f:column(rows),
-		actionVerb = string.format('Classify %d photo%s', photoCount, photoCount == 1 and '' or 's'),
-	}
-	if result ~= 'ok' then return nil end
-
-	-- Saved before checking, so a rejected entry is still there to fix next time.
-	prefs.labelSet, prefs.hints, prefs.onlyHints = props.labelSet, props.hints, props.onlyHints
-	local options = { labelSet = props.labelSet, hints = parseHints(props.hints), onlyHints = props.onlyHints }
-	if options.onlyHints and #options.hints == 0 then
-		LrDialogs.message('Classify Photos', 'Enter at least one hint, or untick "Use only the hints".', 'warning')
-		return nil
-	end
-	-- The hints file is read like a label set, so "=>" would map a hint to a nested keyword.
-	for _, hint in ipairs(options.hints) do
-		if hint:find('=>', 1, true) then
-			LrDialogs.message('Classify Photos',
-				'Hints can\'t map to nested keywords: remove "=>" from "' .. hint .. '".\n' ..
-				'Put mappings in a label set file instead.', 'warning')
-			return nil
-		end
-	end
-	return options
-end
-
 -- Builds the --labels options for the chosen set and hints. Hints go in a temp file (deleted
 -- when `context` ends) so they never pass through the command line.
 local function labelArguments(context, options)
 	local args = { '--top ' .. TOP_LABELS }
 	if not options.onlyHints then
-		local setFile = LrPathUtils.child(LrPathUtils.child(_PLUGIN.path, LABEL_SET_DIR), options.labelSet .. '.txt')
+		local setFile = LrPathUtils.child(LrPathUtils.child(_PLUGIN.path, Options.LABEL_SET_DIR), options.labelSet .. '.txt')
 		args[#args + 1] = string.format('--labels "%s"', setFile)
 	end
 	if #options.hints > 0 then
@@ -349,7 +240,7 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 		LrDialogs.message('Classification report', 'No photos to process.', 'info')
 		return
 	end
-	local options = askOptions(context, #paths)
+	local options = Options.ask(context, #paths)
 	if not options then return end
 	local labelArgs = labelArguments(context, options)
 	-- Lightroom's thumbnails are requested while classifying, so most are ready for the review.

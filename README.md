@@ -6,9 +6,10 @@ Windows console app (`klassifier.exe`, written in Rust) on the targeted photos.
 The app scores each photo against a list of labels ("dog", "beach",
 "sunset", ...) with the [SigLIP](https://huggingface.co/google/siglip-base-patch16-224)
 image model, and the plugin shows the suggested keywords for each photo in a
-review window (`klassifier-ui.exe`, also Rust, built with
-[Slint](https://slint.dev)). When you accept them, the plugin adds them to the
-photos in the catalog.
+review window. The plugin's windows (the options dialog, the review and its
+report) are `klassifier-ui.exe`, also Rust, built with
+[Slint](https://slint.dev). When you accept the keywords, the plugin adds them
+to the photos in the catalog.
 
 The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
 to the CPU. This small model is only slightly slower on the CPU. On a PC with
@@ -121,9 +122,10 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 - Go to **File > Plug-in Extras > Classify Photos** (or **Library > Plug-in
   Extras > Classify Photos**).
 - A dialog asks for the label set and optional hints (see below), then
-  classifies when you click **Classify N photos**. If nothing is selected,
-  Lightroom targets the whole filmstrip, so check the count. Above 500 photos
-  the dialog warns that it can take a while.
+  classifies when you click **Classify N photos** (or press Enter). If nothing
+  is selected, Lightroom targets the whole filmstrip, so check the count.
+  Above 500 photos the dialog warns that it can take a while. Esc cancels. It
+  opens centred over Lightroom, or where you last moved it.
 - Videos are skipped. Virtual copies that share a file with another targeted
   photo are processed only once, and share its suggestions.
 - Photos go to `klassifier.exe` 100 at a time, with a progress bar. Cancel
@@ -241,8 +243,9 @@ nothing closer. The fix is to add a label that describes it.
 - **Hints** are extra labels for one run, typed in the dialog separated by
   commas or semicolons (e.g. `makeup, hair styling, backstage`). They're
   added to the chosen set. Tick **Use only the hints** to label photos from
-  your hints alone. Hints can't map to nested keywords: the dialog refuses a
-  hint containing `=>`.
+  your hints alone. Hints can't map to nested keywords. While a hint contains
+  `=>`, or **Use only the hints** is ticked with no hints, the dialog says so
+  and **Classify** stays disabled.
 - The dialog remembers the last set, hints and checkbox.
 
 Each label becomes the prompt "a photo of <label>". Concrete nouns and short

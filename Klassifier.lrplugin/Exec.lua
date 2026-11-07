@@ -7,6 +7,7 @@
 local LrFileUtils = import 'LrFileUtils'
 local LrLogger    = import 'LrLogger'
 local LrPathUtils = import 'LrPathUtils'
+local LrPrefs     = import 'LrPrefs'
 local LrTasks     = import 'LrTasks'
 
 local logger = LrLogger('Klassifier')
@@ -63,6 +64,33 @@ end
 -- `s` as one field that keeps its line breaks: "\" -> "\\", line break -> "\n".
 function Exec.escape(s)
 	return (tostring(s or ''):gsub('\r', ''):gsub('\\', '\\\\'):gsub('\n', '\\n'):gsub('\t', ' '))
+end
+
+-- Undoes `escape`: "\\n" -> line break, "\\\\" -> "\\"; any other backslash is kept.
+function Exec.unescape(s)
+	return (tostring(s or ''):gsub('\\(.?)', function(c)
+		if c == 'n' then return '\n' end
+		if c == '\\' then return '\\' end
+		return '\\' .. c
+	end))
+end
+
+-- Where each window was last closed is kept in the plugin's preferences, under a key per
+-- window, as klassifier-ui.exe's WINDOW line fields: "x<TAB>y<TAB>width<TAB>height<TAB>maximized".
+local WINDOW_FIELDS = '^%-?%d+\t%-?%d+\t%d+\t%d+\t[01]$'
+
+-- Adds the WINDOW line for the window saved under `key` to `lines`, if there is one.
+function Exec.addSavedWindow(lines, key)
+	local saved = LrPrefs.prefsForPlugin()[key]
+	if type(saved) == 'string' and saved:match(WINDOW_FIELDS) then lines[#lines + 1] = 'WINDOW\t' .. saved end
+end
+
+-- Saves where the window was closed (the WINDOW line in its `output`) under `key`.
+function Exec.saveWindow(output, key)
+	for line in output:gmatch('[^\r\n]+') do
+		local fields = line:match('^WINDOW\t(.*)$')
+		if fields and fields:match(WINDOW_FIELDS) then LrPrefs.prefsForPlugin()[key] = fields end
+	end
 end
 
 -- Writes `lines` to `file`, one per line. Returns true, or nil plus an error message.
