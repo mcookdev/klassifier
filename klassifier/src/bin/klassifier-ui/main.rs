@@ -24,7 +24,7 @@ use std::rc::Rc;
 use anyhow::{bail, Context, Result};
 use slint::platform::Key;
 use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString};
-use ui_model::{move_selection, Item, Label, Move, Outcome, ReportInput, ReviewInput};
+use ui_model::{move_selection, Geometry, Item, Label, Move, Outcome, ReportInput, ReviewInput};
 
 const USAGE: &str = "\
 Usage: klassifier-ui --review --in <file>
@@ -133,22 +133,31 @@ fn run() -> Result<()> {
             |ui: &ReviewWindow| ui.invoke_columns_changed(ui.get_columns()),
         );
     }
-    let (outcome, items) = review(input, select)?;
-    ui_model::write_result(&mut io::stdout().lock(), outcome, &items)?;
+    let (closed, items) = review(input, select)?;
+    ui_model::write_result(&mut io::stdout().lock(), closed.outcome, &items, closed.window)?;
     Ok(())
 }
 
 /// Shows the no-results report until closed (or saves a picture of it to `screenshot`).
 fn show_report(report: ReportInput, screenshot_png: Option<&Path>) -> Result<()> {
+    let closed_at = Rc::new(StdCell::new(None));
     let make = || -> Result<ReportWindow> {
         let ui = ReportWindow::new()?;
         ui.set_summary(report.summary.as_str().into());
         ui.set_report(report.lines.join("\n").into());
-        let weak = ui.as_weak();
+        let (weak, at) = (ui.as_weak(), closed_at.clone());
         ui.on_ok(move || {
             if let Some(ui) = weak.upgrade() {
+                at.set(win::geometry(ui.window()));
                 let _ = ui.hide();
             }
+        });
+        let (weak, at) = (ui.as_weak(), closed_at.clone());
+        ui.window().on_close_requested(move || {
+            if let Some(ui) = weak.upgrade() {
+                at.set(win::geometry(ui.window()));
+            }
+            CloseRequestResponse::HideWindow
         });
         Ok(ui)
     };
@@ -156,19 +165,26 @@ fn show_report(report: ReportInput, screenshot_png: Option<&Path>) -> Result<()>
         return screenshot(png, make, |_| {});
     }
     let ui = make()?;
-    win::place(ui.window());
+    win::place(&ui, report.window);
     ui.run()?;
-    ui_model::write_result(&mut io::stdout().lock(), Outcome::Ok, &[])?;
+    ui_model::write_result(&mut io::stdout().lock(), Outcome::Ok, &[], closed_at.get())?;
     Ok(())
 }
 
 /// Builds the window for `input`, with photo `select` in the side panel. `threaded`: load
 /// images on worker threads (false for screenshots, which have no event loop to deliver them).
+/// What the review window ends with: the outcome, and where the window was.
+#[derive(Clone, Copy)]
+struct Closed {
+    outcome: Outcome,
+    window: Option<Geometry>,
+}
+
 fn build(
     input: ReviewInput,
     select: usize,
     threaded: bool,
-) -> Result<(ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Outcome>>)> {
+) -> Result<(ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>)> {
     let ui = ReviewWindow::new()?;
     let items = Rc::new(RefCell::new(input.items));
     let model = grid::GridModel::new(items.clone(), &ui, threaded);
@@ -178,12 +194,12 @@ fn build(
     ui.set_selected(select as i32);
     model.show_panel(&ui, select);
 
-    let outcome = Rc::new(StdCell::new(Outcome::Cancel));
-    let finish = |result: Outcome| {
-        let (weak, outcome) = (ui.as_weak(), outcome.clone());
+    let closed = Rc::new(StdCell::new(Closed { outcome: Outcome::Cancel, window: None }));
+    let finish = |outcome: Outcome| {
+        let (weak, closed) = (ui.as_weak(), closed.clone());
         move || {
-            outcome.set(result);
             if let Some(ui) = weak.upgrade() {
+                closed.set(Closed { outcome, window: win::geometry(ui.window()) });
                 let _ = ui.hide();
             }
         }
@@ -239,7 +255,7 @@ fn build(
             _ => false,
         }
     });
-    Ok((ui, items, outcome))
+    Ok((ui, items, closed))
 }
 
 fn show_totals(ui: &ReviewWindow, items: &[Item]) {
@@ -282,20 +298,25 @@ fn label_key(text: &str) -> Option<usize> {
 
 /// Shows the window until the user decides. Closing it counts as Cancel, after asking if
 /// anything was changed.
-fn review(input: ReviewInput, select: usize) -> Result<(Outcome, Vec<Item>)> {
-    let (ui, items, outcome) = build(input, select, true)?;
-    let weak = ui.as_weak();
+fn review(input: ReviewInput, select: usize) -> Result<(Closed, Vec<Item>)> {
+    let saved = input.window;
+    let (ui, items, closed) = build(input, select, true)?;
+    let (weak, c) = (ui.as_weak(), closed.clone());
     ui.window().on_close_requested(move || match weak.upgrade() {
         Some(ui) if ui.get_edited_count() > 0 => {
             ui.invoke_request_cancel();
             CloseRequestResponse::KeepWindowShown
         }
-        _ => CloseRequestResponse::HideWindow,
+        Some(ui) => {
+            c.set(Closed { outcome: Outcome::Cancel, window: win::geometry(ui.window()) });
+            CloseRequestResponse::HideWindow
+        }
+        None => CloseRequestResponse::HideWindow,
     });
-    win::place(ui.window());
+    win::place(&ui, saved);
     ui.run()?;
     let items = items.borrow().clone();
-    Ok((outcome.get(), items))
+    Ok((closed.get(), items))
 }
 
 /// A review of the JPEGs in `dir` (repeated up to `count` photos, if more), with made-up
@@ -335,7 +356,7 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
             }
         })
         .collect();
-    Ok(ReviewInput { notes: "Labels: demo. 0 failed, 0 unsupported.".into(), items })
+    Ok(ReviewInput { notes: "Labels: demo. 0 failed, 0 unsupported.".into(), items, window: None })
 }
 
 /// Renders the window `make` builds off screen with the software renderer and saves it as a

@@ -130,7 +130,9 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   takes effect between batches. A console window may flash for each batch.
   Each batch spends about half a second loading the model, then roughly
   30 ms per ARW and 60-120 ms per CR2 or JPEG.
-- The **Review keywords** window opens centred over Lightroom. It shows all
+- The **Review keywords** window opens where you last left it (maximized if it
+  was), or centred over Lightroom the first time, or if that monitor is gone.
+  It's moved back onto the screen if part of it would be off. It shows all
   the photos in a scrolling grid that fills the window's width, each with its
   file name and how many keywords it will get ("3 Keywords", or "0 Keywords"
   when nothing was suggested). The top shows the totals, the label set, and
@@ -165,7 +167,7 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 - If no photo could be classified, a report opens instead of the review
   window: how many failed or were unsupported or skipped, what it ran on, the
   label set, and each photo's error. The errors can be selected and copied
-  (Ctrl+C). OK, Enter or Esc closes it.
+  (Ctrl+C). OK, Enter or Esc closes it. It also opens where you last left it.
 - **About** shows the Slint attribution its license asks for.
 - While Classify Photos is running or its review is open, starting it again
   says so instead of opening a second one.

@@ -19,6 +19,7 @@
 local LrDialogs   = import 'LrDialogs'
 local LrFileUtils = import 'LrFileUtils'
 local LrLogger    = import 'LrLogger'
+local LrPrefs     = import 'LrPrefs'
 
 local Exec = require 'Exec'
 
@@ -74,9 +75,30 @@ function Review.copyNote(item)
 	return '+' .. (copies == 1 and '1 virtual copy' or noun)
 end
 
+-- Where each window was last closed, kept in the plugin's preferences under these keys as
+-- the WINDOW line's fields: "x<TAB>y<TAB>width<TAB>height<TAB>maximized".
+local REVIEW_WINDOW, REPORT_WINDOW = 'reviewWindow', 'reportWindow'
+local WINDOW_FIELDS = '^%-?%d+\t%-?%d+\t%d+\t%d+\t[01]$'
+
+-- Adds the WINDOW line for the window saved under `key` to `lines`, if there is one.
+local function addSavedWindow(lines, key)
+	local saved = LrPrefs.prefsForPlugin()[key]
+	if type(saved) == 'string' and saved:match(WINDOW_FIELDS) then lines[#lines + 1] = 'WINDOW\t' .. saved end
+end
+
+-- Saves where the window was closed (its output's WINDOW line) under `key`.
+local function saveWindow(output, key)
+	for line in output:gmatch('[^\r\n]+') do
+		local fields = line:match('^WINDOW\t(.*)$')
+		if fields and fields:match(WINDOW_FIELDS) then LrPrefs.prefsForPlugin()[key] = fields end
+	end
+end
+
 -- The review window's input lines for `items` (ui_model.rs describes them).
 local function inputLines(items, notes)
-	local lines = { '#klassifier-ui\treview\t1', 'NOTES\t' .. Exec.escape(notes) }
+	local lines = { '#klassifier-ui\treview\t1' }
+	addSavedWindow(lines, REVIEW_WINDOW)
+	lines[#lines + 1] = 'NOTES\t' .. Exec.escape(notes)
 	for n, item in ipairs(items) do
 		local set = item.chosen or item.suggested
 		lines[#lines + 1] = table.concat({
@@ -126,6 +148,7 @@ function Review.show(context, items, notes)
 		return 'cancel'
 	end
 	local output, runErr = Exec.run('klassifier-ui.exe', string.format('--review --in "%s"', inFile))
+	if output then saveWindow(output, REVIEW_WINDOW) end
 	local result = output and readResult(output, items)
 	if not result then
 		local why = runErr or ('No result from klassifier-ui.exe:\n' .. (output or ''):sub(-1000))
@@ -141,13 +164,16 @@ end
 function Review.showReport(context, summary, lines)
 	local inFile = Exec.tempFile('klassifier-report.txt')
 	context:addCleanupHandler(function() LrFileUtils.delete(inFile) end)
-	local input = { '#klassifier-ui\treport\t1', 'SUMMARY\t' .. Exec.escape(summary) }
+	local input = { '#klassifier-ui\treport\t1' }
+	addSavedWindow(input, REPORT_WINDOW)
+	input[#input + 1] = 'SUMMARY\t' .. Exec.escape(summary)
 	for _, line in ipairs(lines) do input[#input + 1] = 'LINE\t' .. Exec.clean(line) end
 	local ok, err = Exec.writeLines(inFile, input)
 	local output, runErr
 	if ok then
 		output, runErr = Exec.run('klassifier-ui.exe', string.format('--report --in "%s"', inFile))
 	end
+	if output then saveWindow(output, REPORT_WINDOW) end
 	if not output then
 		-- The window failed: show the gist in a plain message instead.
 		local why = runErr or ('Could not write ' .. inFile .. ': ' .. tostring(err))

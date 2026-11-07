@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use klassifier::ui_model::{
-    grid_rows, move_selection, parse_report, parse_review, place_window, totals, totals_line, unescape, write_result,
-    Item, Label, Move, Outcome, Rect,
+    grid_rows, move_selection, parse_report, parse_review, place_window, restore_window, totals, totals_line, unescape,
+    write_result, Geometry, Item, Label, Move, Outcome, Rect,
 };
 
 fn label(name: &str, suggested: bool) -> Label {
@@ -108,14 +108,14 @@ fn writes_result_for_edited_items_only() {
     let mut items = parse_review(SAMPLE).unwrap().items;
     items[0].labels[0].chosen = true; // not edited: ignored
     let mut out = Vec::new();
-    write_result(&mut out, Outcome::Accept, &items).unwrap();
+    write_result(&mut out, Outcome::Accept, &items, None).unwrap();
     let text = String::from_utf8(out).unwrap();
     let lines: Vec<&str> = text.lines().collect();
     assert!(lines[0].starts_with("#klassifier-ui\t"));
     assert_eq!(&lines[1..], ["RESULT\taccept", "EDITED\t2", "CHOSEN\t2\t2"]);
 
     let mut out = Vec::new();
-    write_result(&mut out, Outcome::Cancel, &[]).unwrap();
+    write_result(&mut out, Outcome::Cancel, &[], None).unwrap();
     assert!(String::from_utf8(out).unwrap().contains("RESULT\tcancel\n"));
 }
 
@@ -180,7 +180,7 @@ fn edits_reach_the_result_and_totals() {
     items[1].toggle(0); // nothing
     assert_eq!(totals(&items), (4, 2));
     let mut out = Vec::new();
-    write_result(&mut out, Outcome::Accept, &items).unwrap();
+    write_result(&mut out, Outcome::Accept, &items, None).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert_eq!(&text.lines().collect::<Vec<_>>()[1..], ["RESULT\taccept", "EDITED\t1", "CHOSEN\t1\t1", "CHOSEN\t1\t2", "EDITED\t2"]);
 }
@@ -237,6 +237,52 @@ fn report_needs_its_header() {
 #[test]
 fn writes_ok_for_the_report() {
     let mut out = Vec::new();
-    write_result(&mut out, Outcome::Ok, &[]).unwrap();
+    write_result(&mut out, Outcome::Ok, &[], None).unwrap();
     assert_eq!(String::from_utf8(out).unwrap().lines().nth(1), Some("RESULT\tok"));
+}
+
+#[test]
+fn reads_the_saved_window() {
+    let header = "#klassifier-ui\treview\t1\n";
+    let input = parse_review(&format!("{header}WINDOW\t-1910\t40\t1600\t900\t1\nITEM\t1\ta\t\t1\t0\ts\tr\n")).unwrap();
+    assert_eq!(input.window, Some(Geometry { rect: Rect { x: -1910, y: 40, w: 1600, h: 900 }, maximized: true }));
+    let report = parse_report("#klassifier-ui\treport\t1\nWINDOW\t5\t6\t700\t500\t0\n").unwrap();
+    assert_eq!(report.window, Some(Geometry { rect: Rect { x: 5, y: 6, w: 700, h: 500 }, maximized: false }));
+}
+
+#[test]
+fn ignores_a_bad_saved_window() {
+    let header = "#klassifier-ui\treview\t1\n";
+    for line in ["WINDOW\t1\t2\t3", "WINDOW\ta\t2\t300\t300\t0", "WINDOW\t1\t2\t0\t300\t0", "WINDOW\t1\t2\t300\t300\t2"] {
+        let input = parse_review(&format!("{header}{line}\nITEM\t1\ta\t\t1\t0\ts\tr\n")).unwrap();
+        assert_eq!(input.window, None, "{line}");
+        assert_eq!(input.items.len(), 1);
+    }
+}
+
+#[test]
+fn writes_the_window_on_close() {
+    let mut out = Vec::new();
+    let window = Geometry { rect: Rect { x: -8, y: 0, w: 2576, h: 1416 }, maximized: true };
+    write_result(&mut out, Outcome::Cancel, &[], Some(window)).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert_eq!(&text.lines().collect::<Vec<_>>()[1..], ["RESULT\tcancel", "WINDOW\t-8\t0\t2576\t1416\t1"]);
+    // Read back as input, it is the same window.
+    let input = parse_review(&format!("#klassifier-ui\treview\t1\n{}\n", text.lines().nth(2).unwrap())).unwrap();
+    assert_eq!(input.window, Some(window));
+}
+
+#[test]
+fn restored_window_kept_on_its_monitor() {
+    let work = Rect { x: 1920, y: 0, w: 1920, h: 1040 };
+    let min = (900, 600);
+    // Where it was left: unchanged.
+    let saved = Rect { x: 2000, y: 100, w: 1200, h: 800 };
+    assert_eq!(restore_window(saved, work, min), saved);
+    // Partly off the monitor (the taskbar side, or a resolution change): moved back on.
+    let r = restore_window(Rect { x: 3500, y: 700, w: 1200, h: 800 }, work, min);
+    assert_eq!(r, Rect { x: 1920 + 1920 - 1200, y: 1040 - 800, w: 1200, h: 800 });
+    // Too small or too big: at least the minimum, at most the monitor.
+    assert_eq!(restore_window(Rect { x: 2000, y: 100, w: 300, h: 200 }, work, min), Rect { x: 2000, y: 100, w: 900, h: 600 });
+    assert_eq!(restore_window(Rect { x: 1800, y: -50, w: 4000, h: 3000 }, work, min), work);
 }

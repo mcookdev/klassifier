@@ -5,13 +5,16 @@
 //!
 //! ```text
 //! #klassifier-ui<TAB>review<TAB>1
+//! WINDOW<TAB><x><TAB><y><TAB><width><TAB><height><TAB><maximized 0|1>   (optional)
 //! NOTES<TAB><text>
 //! ITEM<TAB><n><TAB><name><TAB><copy note><TAB><photo count><TAB><edited 0|1><TAB><stand-in thumbnail><TAB><Lightroom thumbnail>
 //! LABEL<TAB><n><TAB><label><TAB><suggested 0|1><TAB><chosen 0|1><TAB><keyword "Parent > Child", or empty>
 //! ```
 //!
 //! Items are numbered from 1, in order, and each item's LABEL lines follow its ITEM line, best
-//! label first. In NOTES, `\n` stands for a line break and `\\` for a backslash. The stand-in
+//! label first. WINDOW is where the window was last closed, as the output gave it: its
+//! outer top-left corner and inner size, in physical pixels. In NOTES, `\n` stands for a line
+//! break and `\\` for a backslash. The stand-in
 //! thumbnail is the one `klassifier.exe --thumbs` writes; the Lightroom one, rendered with the
 //! photo's edits, may appear later. Neither file has to exist yet.
 //!
@@ -22,17 +25,19 @@
 //! RESULT<TAB>accept|cancel
 //! EDITED<TAB><n>              (for each edited item)
 //! CHOSEN<TAB><n><TAB><k>      (for each ticked label of an edited item; k counts its LABEL lines from 1)
+//! WINDOW<TAB>...               (where the window was, as in the input; not if minimized)
 //! ```
 //!
 //! The no-results report (`--report`) reads:
 //!
 //! ```text
 //! #klassifier-ui<TAB>report<TAB>1
+//! WINDOW<TAB>...               (optional, as for the review)
 //! SUMMARY<TAB><text, escaped as NOTES>
 //! LINE<TAB><text>             (one per report line; the rest of the line, tabs included)
 //! ```
 //!
-//! and writes `RESULT<TAB>ok` when closed.
+//! and writes `RESULT<TAB>ok` and a WINDOW line when closed.
 //!
 //! Lines starting with `#` are informational. Readers ignore unknown lines and extra fields.
 
@@ -67,6 +72,36 @@ pub struct Item {
 pub struct ReviewInput {
     pub notes: String,
     pub items: Vec<Item>,
+    pub window: Option<Geometry>,
+}
+
+/// Where a window is: its outer top-left corner and inner size, in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Geometry {
+    pub rect: Rect,
+    pub maximized: bool,
+}
+
+/// A WINDOW line's fields after the tag, or None if they don't make a window: a bad saved
+/// position is ignored rather than stopping the window.
+fn parse_window(fields: &[&str]) -> Option<Geometry> {
+    let [x, y, w, h, maximized, ..] = fields else { return None };
+    let rect = Rect { x: x.parse().ok()?, y: y.parse().ok()?, w: w.parse().ok()?, h: h.parse().ok()? };
+    let maximized = match *maximized {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+    (rect.w > 0 && rect.h > 0).then_some(Geometry { rect, maximized })
+}
+
+fn write_window(out: &mut impl Write, window: Option<Geometry>) -> io::Result<()> {
+    match window {
+        Some(Geometry { rect: Rect { x, y, w, h }, maximized }) => {
+            writeln!(out, "WINDOW\t{x}\t{y}\t{w}\t{h}\t{}", u8::from(maximized))
+        }
+        None => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,6 +241,7 @@ pub fn parse_review(text: &str) -> Result<ReviewInput> {
         let fields: Vec<&str> = line.split('\t').collect();
         match fields[0] {
             "NOTES" => input.notes = unescape(fields.get(1).copied().unwrap_or("")),
+            "WINDOW" => input.window = parse_window(&fields[1..]),
             "ITEM" => {
                 if fields.len() < 8 {
                     bail!("line {n}: ITEM needs 8 fields, has {}", fields.len());
@@ -250,6 +286,7 @@ pub fn parse_review(text: &str) -> Result<ReviewInput> {
 pub struct ReportInput {
     pub summary: String,
     pub lines: Vec<String>,
+    pub window: Option<Geometry>,
 }
 
 pub fn parse_report(text: &str) -> Result<ReportInput> {
@@ -259,13 +296,15 @@ pub fn parse_report(text: &str) -> Result<ReportInput> {
         match tag {
             "SUMMARY" => report.summary = unescape(rest),
             "LINE" => report.lines.push(rest.to_string()),
+            "WINDOW" => report.window = parse_window(&rest.split('\t').collect::<Vec<_>>()),
             _ => {}
         }
     }
     Ok(report)
 }
 
-pub fn write_result(out: &mut impl Write, outcome: Outcome, items: &[Item]) -> io::Result<()> {
+/// The window's output: `outcome`, the edited `items`' choices, and where the window was.
+pub fn write_result(out: &mut impl Write, outcome: Outcome, items: &[Item], window: Option<Geometry>) -> io::Result<()> {
     writeln!(out, "#klassifier-ui\t{}", env!("CARGO_PKG_VERSION"))?;
     writeln!(out, "RESULT\t{}", outcome.as_str())?;
     for (i, item) in items.iter().enumerate().filter(|(_, item)| item.edited) {
@@ -274,6 +313,7 @@ pub fn write_result(out: &mut impl Write, outcome: Outcome, items: &[Item]) -> i
             writeln!(out, "CHOSEN\t{}\t{}", i + 1, k + 1)?;
         }
     }
+    write_window(out, window)?;
     out.flush()
 }
 
@@ -333,6 +373,16 @@ pub struct Rect {
     pub y: i32,
     pub w: i32,
     pub h: i32,
+}
+
+/// Where a window opens at its saved position `saved`: as it was, but at least `min` and at
+/// most the work area `work` of the monitor it is on, and moved inside that work area.
+pub fn restore_window(saved: Rect, work: Rect, min: (i32, i32)) -> Rect {
+    let w = saved.w.max(min.0).min(work.w);
+    let h = saved.h.max(min.1).min(work.h);
+    let x = saved.x.clamp(work.x, work.x + work.w - w);
+    let y = saved.y.clamp(work.y, work.y + work.h - h);
+    Rect { x, y, w, h }
 }
 
 /// Where the review window opens: 80% of Lightroom's window `target` but at least `min`,

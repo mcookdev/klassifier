@@ -1,20 +1,54 @@
-//! Opens the window centred over Lightroom's main window, on its monitor. Without this,
-//! Windows picks the position and may use another monitor.
+//! Where the windows open: where the user last left them, if that is still on a monitor,
+//! else centred over Lightroom's main window, on its monitor. Without this, Windows picks the
+//! position and may use another monitor.
 
-/// Smallest size the window opens at, in logical pixels.
+use crate::ui_model::{Geometry, Rect};
+
+/// Smallest size a window opens at, in logical pixels.
 #[cfg(windows)]
 const MIN_SIZE: (f32, f32) = (900.0, 600.0);
 
-pub fn place(window: &slint::Window) {
+/// Sizes and places `ui`'s window before it is shown: at `saved` (where it was last closed)
+/// if that is on a monitor, else over Lightroom.
+pub fn place<T: slint::ComponentHandle + 'static>(ui: &T, saved: Option<Geometry>) {
     #[cfg(windows)]
-    if let Some((target, work, scale)) = imp::lightroom_window() {
-        let min = ((MIN_SIZE.0 * scale) as i32, (MIN_SIZE.1 * scale) as i32);
-        let r = crate::ui_model::place_window(target, work, min);
-        window.set_size(slint::PhysicalSize::new(r.w as u32, r.h as u32));
-        window.set_position(slint::PhysicalPosition::new(r.x, r.y));
+    {
+        let window = ui.window();
+        let min = |scale: f32| ((MIN_SIZE.0 * scale) as i32, (MIN_SIZE.1 * scale) as i32);
+        let restored = saved.and_then(|saved| {
+            let (work, scale) = imp::monitor_of(saved.rect)?;
+            Some((crate::ui_model::restore_window(saved.rect, work, min(scale)), saved.maximized))
+        });
+        let placed = restored.or_else(|| {
+            let (target, work, scale) = imp::lightroom_window()?;
+            Some((crate::ui_model::place_window(target, work, min(scale)), false))
+        });
+        if let Some((r, maximized)) = placed {
+            window.set_size(slint::PhysicalSize::new(r.w as u32, r.h as u32));
+            window.set_position(slint::PhysicalPosition::new(r.x, r.y));
+            if maximized {
+                // Once the window exists: before that there is nothing to maximize.
+                let weak = ui.as_weak();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.window().set_maximized(true);
+                    }
+                });
+            }
+        }
     }
     #[cfg(not(windows))]
-    let _ = window;
+    let _ = (ui, saved);
+}
+
+/// Where `window` is now, to open there next time; None if it is minimized.
+pub fn geometry(window: &slint::Window) -> Option<Geometry> {
+    if window.is_minimized() {
+        return None;
+    }
+    let (position, size) = (window.position(), window.size());
+    let rect = Rect { x: position.x, y: position.y, w: size.width as i32, h: size.height as i32 };
+    (rect.w > 0 && rect.h > 0).then_some(Geometry { rect, maximized: window.is_maximized() })
 }
 
 #[cfg(windows)]
@@ -24,11 +58,14 @@ mod imp {
     use crate::ui_model::Rect;
     use windows::core::BOOL;
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
-    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromRect, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        MONITOR_DEFAULTTONULL,
+    };
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
-    use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
     use windows::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
         GW_OWNER,
@@ -44,15 +81,34 @@ mod imp {
         unsafe {
             let mut r = RECT::default();
             GetWindowRect(hwnd, &mut r).ok()?;
-            let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-            let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-            if !GetMonitorInfoW(monitor, &mut info).as_bool() {
-                return None;
-            }
+            let work = work_area(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST))?;
             let dpi = GetDpiForWindow(hwnd);
             let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
-            Some((rect(r), rect(info.rcWork), scale))
+            Some((rect(r), work, scale))
         }
+    }
+
+    /// The work area and display scale of the monitor `r` is on (most of), or None if it is
+    /// on none: that monitor was unplugged or moved.
+    pub fn monitor_of(r: Rect) -> Option<(Rect, f32)> {
+        let r = RECT { left: r.x, top: r.y, right: r.x + r.w, bottom: r.y + r.h };
+        unsafe {
+            let monitor = MonitorFromRect(&r, MONITOR_DEFAULTTONULL);
+            if monitor.is_invalid() {
+                return None;
+            }
+            let (mut dpi, mut unused) = (0, 0);
+            let scale = match GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused) {
+                Ok(()) if dpi > 0 => dpi as f32 / 96.0,
+                _ => 1.0,
+            };
+            Some((work_area(monitor)?, scale))
+        }
+    }
+
+    fn work_area(monitor: HMONITOR) -> Option<Rect> {
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        unsafe { GetMonitorInfoW(monitor, &mut info).as_bool() }.then(|| rect(info.rcWork))
     }
 
     fn rect(r: RECT) -> Rect {
