@@ -1,5 +1,6 @@
 // The review window: a scrolling grid of the classified photos with their keyword counts,
-// and Accept All / Cancel. See src/bin/klassifier-ui/.
+// a side panel to change the selected photo's keywords, and Accept All / Cancel.
+// See src/bin/klassifier-ui/.
 import { Button, ListView, AboutSlint } from "std-widgets.slint";
 
 export struct Cell {
@@ -17,20 +18,40 @@ export struct GridRow {
     cells: [Cell],
 }
 
+// One of the selected photo's labels, as the side panel shows it.
+export struct PanelLabel {
+    name: string,
+    // Where its keyword goes ("Wildlife > Bird > Egret"), or empty.
+    keyword: string,
+    // Will be written: the user's choice once edited, else the suggestion.
+    checked: bool,
+    suggested: bool,
+}
+
 export global Metrics {
     out property <length> thumb-size: 160px;
     out property <length> cell-padding: 8px;
     out property <length> cell-width: self.thumb-size + 2 * self.cell-padding;
     out property <length> cell-height: 230px;
     out property <length> spacing: 6px;
+    // A grid line, its top spacing included.
+    out property <length> row-height: self.cell-height + self.spacing;
+    out property <length> panel-width: 340px;
+    out property <length> panel-padding: 12px;
+    out property <length> panel-image-width: self.panel-width - 2 * self.panel-padding;
+    out property <length> panel-image-height: self.panel-image-width * 3 / 4;
 }
 
 component GridCell inherits Rectangle {
     in property <Cell> cell;
+    in property <bool> selected;
+    callback clicked();
     width: Metrics.cell-width;
     height: Metrics.cell-height;
-    background: #3a3a3a;
+    background: root.selected ? #505050 : touch.has-hover ? #404040 : #3a3a3a;
     border-radius: 3px;
+    border-width: root.selected ? 1px : 0px;
+    border-color: #b0b0b0;
 
     VerticalLayout {
         padding: Metrics.cell-padding;
@@ -68,28 +89,140 @@ component GridCell inherits Rectangle {
             horizontal-alignment: center;
         }
     }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// A label with its tick box. `number` is the key that ticks it (1-9, 10 for 0), or 0.
+component LabelRow inherits Rectangle {
+    in property <int> number;
+    in property <PanelLabel> label;
+    callback toggled();
+    height: 26px;
+    background: touch.has-hover ? #2e2e2e : transparent;
+    border-radius: 2px;
+
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 8px;
+        Text {
+            width: 12px;
+            text: root.number == 0 ? "" : root.number == 10 ? "0" : "\{root.number}";
+            color: #6e6e6e;
+            font-size: 10px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                border-radius: 2px;
+                border-width: 1px;
+                border-color: root.label.checked ? #4a90d9 : #8a8a8a;
+                background: root.label.checked ? #4a90d9 : #262626;
+                Path {
+                    visible: root.label.checked;
+                    width: 10px;
+                    height: 10px;
+                    viewbox-width: 10;
+                    viewbox-height: 10;
+                    commands: "M 1.5 5 L 4 7.5 L 8.5 2.5";
+                    stroke: #ffffff;
+                    stroke-width: 1.6px;
+                    fill: transparent;
+                }
+            }
+        }
+        Text {
+            text: root.label.name;
+            color: root.label.checked ? #e6e6e6 : #a8a8a8;
+            font-weight: root.label.suggested ? 600 : 400;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label.keyword == "" ? "" : "(" + root.label.keyword + ")";
+            color: #7e7e7e;
+            font-size: 11px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.toggled();
+        }
+    }
 }
 
 export component ReviewWindow inherits Window {
     title: "Review keywords";
     preferred-width: 1200px;
     preferred-height: 800px;
-    min-width: 640px;
-    min-height: 420px;
+    min-width: 800px;
+    min-height: 480px;
     background: #262626;
     default-font-size: 12px;
+    forward-focus: keys;
 
     in property <[GridRow]> rows;
     in property <string> totals;
     in property <string> notes;
+    // Photos the user changed; Cancel asks before throwing their changes away.
+    in property <int> edited-count;
+    // The photo in the side panel.
+    in-out property <int> selected: 0;
+    in property <string> panel-name;
+    in property <string> panel-copies;
+    in property <string> panel-status;
+    in property <bool> panel-edited;
+    in property <[PanelLabel]> panel-labels;
+    in property <image> panel-image;
+    in property <bool> panel-loaded;
+
     // Cells that fit across the list, the scrollbar excluded.
     out property <int> columns: max(1, floor((list.visible-width - Metrics.spacing) / (Metrics.cell-width + Metrics.spacing)));
+    // Whole grid lines on screen: how far Page Up / Page Down move.
+    out property <int> visible-rows: max(1, floor(list.visible-height / Metrics.row-height));
     callback columns-changed(int);
     callback accept-all();
     callback cancel();
+    // A photo was clicked.
+    callback select(int);
+    // Tick or untick the selected photo's label (counted from 0).
+    callback toggle(int);
+    // A key the window doesn't handle itself (arrows, digits...); true if it was used.
+    callback key(string) -> bool;
 
     changed columns => {
         root.columns-changed(root.columns);
+    }
+
+    // Cancel, asking first if any photo was changed.
+    public function request-cancel() {
+        if (root.edited-count > 0) {
+            confirm.show();
+        } else {
+            root.cancel();
+        }
+    }
+
+    // Scrolls the grid just enough to show the selected photo.
+    public function scroll-to-selected() {
+        let top = floor(root.selected / root.columns) * Metrics.row-height;
+        if (top < -list.content-y) {
+            list.content-y = -top;
+        } else if (top + Metrics.row-height > list.visible-height - list.content-y) {
+            list.content-y = list.visible-height - top - Metrics.row-height;
+        }
     }
 
     about := PopupWindow {
@@ -114,64 +247,196 @@ export component ReviewWindow inherits Window {
         }
     }
 
-    VerticalLayout {
+    confirm := PopupWindow {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: 380px;
+        close-policy: close-on-click-outside;
         Rectangle {
-            background: #1c1c1c;
-            HorizontalLayout {
-                padding: 10px;
-                spacing: 8px;
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    alignment: center;
-                    spacing: 2px;
-                    Text {
-                        text: root.totals;
-                        color: #e0e0e0;
-                        font-size: 14px;
-                    }
-                    if root.notes != "": Text {
-                        text: root.notes;
-                        color: #a0a0a0;
-                        wrap: word-wrap;
-                    }
+            background: #1e1e1e;
+            border-color: #555555;
+            border-width: 1px;
+            border-radius: 4px;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 14px;
+                Text {
+                    text: root.edited-count == 1 ? "Discard your changes to 1 photo?" : "Discard your changes to \{root.edited-count} photos?";
+                    color: #e0e0e0;
+                    font-size: 13px;
+                    wrap: word-wrap;
                 }
-                VerticalLayout {
-                    alignment: center;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Button {
-                            text: "About";
-                            clicked => {
-                                about.show();
-                            }
+                Text {
+                    text: "No keywords will be added.";
+                    color: #a0a0a0;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Button {
+                        text: "Keep Editing";
+                        clicked => {
+                            confirm.close();
+                            keys.focus();
                         }
-                        Button {
-                            text: "Cancel";
-                            clicked => {
-                                root.cancel();
-                            }
-                        }
-                        Button {
-                            text: "Accept All";
-                            primary: true;
-                            clicked => {
-                                root.accept-all();
-                            }
+                    }
+                    Button {
+                        text: "Discard";
+                        primary: true;
+                        clicked => {
+                            confirm.close();
+                            root.cancel();
                         }
                     }
                 }
             }
         }
+    }
 
-        list := ListView {
-            for row in root.rows: HorizontalLayout {
-                height: Metrics.cell-height + Metrics.spacing;
-                padding-top: Metrics.spacing;
-                padding-left: Metrics.spacing;
-                spacing: Metrics.spacing;
-                alignment: start;
-                for cell in row.cells: GridCell {
-                    cell: cell;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.request-cancel();
+                return accept;
+            }
+            if (event.modifiers.control && event.text == Key.Return) {
+                root.accept-all();
+                return accept;
+            }
+            if (!event.modifiers.control && !event.modifiers.alt && root.key(event.text)) {
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            Rectangle {
+                background: #1c1c1c;
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.totals;
+                            color: #e0e0e0;
+                            font-size: 14px;
+                        }
+                        if root.notes != "": Text {
+                            text: root.notes;
+                            color: #a0a0a0;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button {
+                                text: "About";
+                                clicked => {
+                                    about.show();
+                                }
+                            }
+                            Button {
+                                text: "Cancel";
+                                clicked => {
+                                    root.request-cancel();
+                                }
+                            }
+                            Button {
+                                text: "Accept All";
+                                primary: true;
+                                clicked => {
+                                    root.accept-all();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                list := ListView {
+                    horizontal-stretch: 1;
+                    for row in root.rows: HorizontalLayout {
+                        height: Metrics.row-height;
+                        padding-top: Metrics.spacing;
+                        padding-left: Metrics.spacing;
+                        spacing: Metrics.spacing;
+                        alignment: start;
+                        for cell in row.cells: GridCell {
+                            cell: cell;
+                            selected: cell.index == root.selected;
+                            clicked => {
+                                root.select(cell.index);
+                                keys.focus();
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: Metrics.panel-width;
+                    background: #1f1f1f;
+                    VerticalLayout {
+                        padding: Metrics.panel-padding;
+                        spacing: 6px;
+                        Rectangle {
+                            width: Metrics.panel-image-width;
+                            height: Metrics.panel-image-height;
+                            background: #161616;
+                            if root.panel-loaded: Image {
+                                source: root.panel-image;
+                                image-fit: contain;
+                                width: parent.width;
+                                height: parent.height;
+                            }
+                        }
+                        Text {
+                            text: root.panel-name;
+                            color: #e6e6e6;
+                            font-size: 13px;
+                            font-weight: 600;
+                            overflow: elide;
+                        }
+                        if root.panel-copies != "": Text {
+                            text: root.panel-copies;
+                            color: #9a9a9a;
+                            font-size: 11px;
+                        }
+                        Text {
+                            text: root.panel-status;
+                            color: root.panel-edited ? #e8b85a : #b4b4b4;
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: #333333;
+                        }
+                        if root.panel-labels.length == 0: Text {
+                            text: "(no labels)";
+                            color: #8a8a8a;
+                        }
+                        ListView {
+                            vertical-stretch: 1;
+                            for label[k] in root.panel-labels: LabelRow {
+                                number: k < 10 ? k + 1 : 0;
+                                label: label;
+                                toggled => {
+                                    root.toggle(k);
+                                    keys.focus();
+                                }
+                            }
+                        }
+                        Text {
+                            text: "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; Ctrl+Enter is Accept All.";
+                            color: #7a7a7a;
+                            font-size: 10px;
+                            wrap: word-wrap;
+                        }
+                    }
                 }
             }
         }

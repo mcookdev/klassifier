@@ -1,5 +1,6 @@
-//! The photo grid's model: one row per grid line, built on demand from the items, so the
-//! ListView only asks for the lines on screen. Thumbnails load lazily and are cached.
+//! The review's view of the items: the photo grid's model (one row per grid line, built on
+//! demand, so the ListView only asks for the lines on screen) and the side panel showing the
+//! selected photo. Thumbnails load lazily and are cached.
 
 use std::cell::{Cell as StdCell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -8,8 +9,8 @@ use std::rc::Rc;
 use crate::ui_model::{grid_rows, Item};
 use slint::{ComponentHandle, Image, Model, ModelNotify, ModelRc, ModelTracker, VecModel};
 
-use crate::thumbs::{self, Loaded, Paths, Quality, ThumbLoader};
-use crate::{Cell, GridRow, Metrics, ReviewWindow};
+use crate::thumbs::{self, Loaded, Paths, Quality, Slot, ThumbLoader};
+use crate::{Cell, GridRow, Metrics, PanelLabel, ReviewWindow};
 
 /// Decoded thumbnails kept; about 100-250 KB each.
 const CACHE_CAP: usize = 400;
@@ -17,13 +18,17 @@ const CACHE_CAP: usize = 400;
 pub struct GridModel {
     items: Rc<RefCell<Vec<Item>>>,
     columns: StdCell<usize>,
-    /// Longest thumbnail edge to decode to, in physical pixels.
+    /// Longest edge to decode to, in physical pixels: grid thumbnails and the panel's picture.
     edge: StdCell<u32>,
+    panel_edge: StdCell<u32>,
     thumb_size: f32,
+    panel_size: f32,
     cache: RefCell<HashMap<usize, (Image, Quality)>>,
     order: RefCell<VecDeque<usize>>,
     pending: RefCell<HashSet<usize>>,
-    /// None for `--screenshot`: thumbnails are then decoded synchronously.
+    /// The panel's picture: (photo, image, quality). One photo at a time.
+    panel: RefCell<Option<(usize, Image, Quality)>>,
+    /// None for `--screenshot`: images are then decoded synchronously.
     loader: Option<ThumbLoader>,
     notify: ModelNotify,
 }
@@ -35,23 +40,31 @@ impl GridModel {
             ThumbLoader::new(move |loaded: Loaded| {
                 let _ = weak.upgrade_in_event_loop(move |ui| {
                     if let Some(model) = ui.get_rows().as_any().downcast_ref::<GridModel>() {
-                        model.loaded(loaded);
+                        model.loaded(&ui, loaded);
                     }
                 });
             })
         });
-        let thumb_size = ui.global::<Metrics>().get_thumb_size();
+        let metrics = ui.global::<Metrics>();
+        let (thumb_size, panel_size) = (metrics.get_thumb_size(), metrics.get_panel_image_width());
         Rc::new(GridModel {
             items,
             columns: StdCell::new(1),
             edge: StdCell::new(thumb_size.round() as u32),
+            panel_edge: StdCell::new(panel_size.round() as u32),
             thumb_size,
+            panel_size,
             cache: RefCell::new(HashMap::new()),
             order: RefCell::new(VecDeque::new()),
             pending: RefCell::new(HashSet::new()),
+            panel: RefCell::new(None),
             loader,
             notify: ModelNotify::default(),
         })
+    }
+
+    pub fn columns(&self) -> usize {
+        self.columns.get()
     }
 
     pub fn set_columns(&self, columns: usize) {
@@ -62,9 +75,16 @@ impl GridModel {
         }
     }
 
-    /// Decode thumbnails for this display scale from now on.
+    /// Decode images for this display scale from now on.
     pub fn set_scale(&self, scale: f32) {
-        self.edge.set((self.thumb_size * scale.max(1.0)).round() as u32);
+        let scale = scale.max(1.0);
+        self.edge.set((self.thumb_size * scale).round() as u32);
+        self.panel_edge.set((self.panel_size * scale).round() as u32);
+    }
+
+    /// Redraws `index`'s cell after its item changed.
+    pub fn item_changed(&self, index: usize) {
+        self.notify.row_changed(index / self.columns.get());
     }
 
     fn paths(&self, index: usize) -> Paths {
@@ -72,8 +92,14 @@ impl GridModel {
         Paths { standin: items[index].standin.clone(), rendered: items[index].rendered.clone() }
     }
 
-    fn loaded(&self, loaded: Loaded) {
-        let index = loaded.index;
+    fn loaded(&self, ui: &ReviewWindow, loaded: Loaded) {
+        match loaded.slot {
+            Slot::Cell(index) => self.cell_loaded(index, loaded),
+            Slot::Panel(index) => self.panel_loaded(ui, index, loaded),
+        }
+    }
+
+    fn cell_loaded(&self, index: usize, loaded: Loaded) {
         self.pending.borrow_mut().remove(&index);
         if let Some(buffer) = loaded.buffer {
             self.cache.borrow_mut().insert(index, (Image::from_rgba8(buffer), loaded.quality));
@@ -84,19 +110,37 @@ impl GridModel {
                 if let Some(old) = order.pop_front() {
                     self.cache.borrow_mut().remove(&old);
                     if let Some(loader) = &self.loader {
-                        loader.unwatch(old);
+                        loader.unwatch(Slot::Cell(old));
                     }
                 }
             }
         }
+        self.watch_if_better(Slot::Cell(index), loaded.quality, self.edge.get());
+        self.notify.row_changed(index / self.columns.get());
+    }
+
+    fn panel_loaded(&self, ui: &ReviewWindow, index: usize, loaded: Loaded) {
+        if ui.get_selected() as usize != index {
+            return; // the selection moved on
+        }
+        if let Some(buffer) = loaded.buffer {
+            let image = Image::from_rgba8(buffer);
+            ui.set_panel_image(image.clone());
+            ui.set_panel_loaded(true);
+            *self.panel.borrow_mut() = Some((index, image, loaded.quality));
+        }
+        self.watch_if_better(Slot::Panel(index), loaded.quality, self.panel_edge.get());
+    }
+
+    /// Reloads `slot` when Lightroom's thumbnail appears, if it has less now.
+    fn watch_if_better(&self, slot: Slot, have: Quality, edge: u32) {
         if let Some(loader) = &self.loader {
-            if loaded.quality < Quality::Rendered {
-                loader.watch(index, self.paths(index), loaded.quality, self.edge.get());
+            if have < Quality::Rendered {
+                loader.watch(slot, self.paths(slot.index()), have, edge);
             } else {
-                loader.unwatch(index);
+                loader.unwatch(slot);
             }
         }
-        self.notify.row_changed(index / self.columns.get());
     }
 
     /// Starts loading `index`'s thumbnail unless it is cached or on its way.
@@ -105,9 +149,9 @@ impl GridModel {
             return;
         }
         match &self.loader {
-            Some(loader) => loader.request(index, self.paths(index), self.edge.get()),
+            Some(loader) => loader.request(Slot::Cell(index), self.paths(index), self.edge.get()),
             None => {
-                let loaded = thumbs::load_now(index, self.paths(index), self.edge.get());
+                let loaded = thumbs::load_now(Slot::Cell(index), self.paths(index), self.edge.get());
                 self.pending.borrow_mut().remove(&index);
                 if let Some(buffer) = loaded.buffer {
                     self.cache.borrow_mut().insert(index, (Image::from_rgba8(buffer), loaded.quality));
@@ -130,6 +174,52 @@ impl GridModel {
             loaded: image.is_some(),
             thumb: image.unwrap_or_default(),
         }
+    }
+
+    /// Shows photo `index` in the side panel: its texts and labels now, and its picture,
+    /// the grid's thumbnail until the larger one is loaded.
+    pub fn show_panel(&self, ui: &ReviewWindow, index: usize) {
+        self.update_panel_labels(ui, index);
+        {
+            let items = self.items.borrow();
+            ui.set_panel_name(items[index].name.as_str().into());
+            ui.set_panel_copies(items[index].copy_note.as_str().into());
+        }
+        let previous = self.panel.borrow().as_ref().map(|(i, _, _)| *i);
+        if previous == Some(index) {
+            return;
+        }
+        if let (Some(old), Some(loader)) = (previous, &self.loader) {
+            loader.unwatch(Slot::Panel(old));
+        }
+        *self.panel.borrow_mut() = None;
+        let interim = self.cache.borrow().get(&index).map(|(image, _)| image.clone());
+        ui.set_panel_loaded(interim.is_some());
+        ui.set_panel_image(interim.unwrap_or_default());
+        let (slot, paths, edge) = (Slot::Panel(index), self.paths(index), self.panel_edge.get());
+        match &self.loader {
+            Some(loader) => loader.request(slot, paths, edge),
+            None => self.panel_loaded(ui, index, thumbs::load_now(slot, paths, edge)),
+        }
+    }
+
+    /// Refreshes the panel's status and ticks for photo `index`.
+    pub fn update_panel_labels(&self, ui: &ReviewWindow, index: usize) {
+        let items = self.items.borrow();
+        let item = &items[index];
+        ui.set_panel_status(item.status().into());
+        ui.set_panel_edited(item.edited);
+        let labels: Vec<PanelLabel> = item
+            .labels
+            .iter()
+            .map(|label| PanelLabel {
+                name: label.name.as_str().into(),
+                keyword: label.keyword.as_str().into(),
+                checked: item.keeps(label),
+                suggested: label.suggested,
+            })
+            .collect();
+        ui.set_panel_labels(ModelRc::new(VecModel::from(labels)));
     }
 }
 

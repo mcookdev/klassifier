@@ -139,10 +139,16 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   crops. For photos Lightroom has no previews of yet, rendering takes it about
   0.4 s each, so the grid first shows the image the app read (for RAW files,
   the camera's embedded preview) and swaps in Lightroom's as it arrives.
-- Editing a photo's keywords isn't in this window yet (it comes in the next
-  version).
-- **Accept All** adds each photo's suggested keywords. Photos with no
-  suggestions get nothing. Keywords are only added,
+- The panel on the right shows the selected photo larger, with all its
+  labels: the suggested ones are ticked and in bold, and a label mapped to a
+  nested keyword shows where it goes ("bird (Wildlife > Bird)"). Click a photo
+  to select it, or move with the arrow keys, Home, End, Page Up and Page Down.
+- Tick or untick a label by clicking it, or press its number: 1-9 for the
+  first nine, 0 for the tenth. The photo then shows "(edited)" and gets exactly
+  the ticked labels, even none. The totals update as you go.
+- **Accept All** (or Ctrl+Enter) adds each photo's keywords: the ticked ones
+  for photos you changed, the suggested ones for the rest. Photos with nothing
+  ticked or suggested get nothing. Keywords are only added,
   never removed, and a keyword that already exists is reused, whatever its
   case (`bird` reuses `Bird`). New keywords are top level, named as in the
   label set, unless the label set maps the label to a nested keyword (see
@@ -153,8 +159,9 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   photo and its copy counts twice. It's one step
   in **Edit > Undo**. If no photo would get a keyword, it says so and adds
   nothing. If Lightroom's catalog is busy, nothing is added and the review
-  window opens again, so you can click **Accept All** again.
-- **Cancel**, or closing the window, changes nothing.
+  window opens again with your changes, so you can click **Accept All** again.
+- **Cancel** (or Esc), or closing the window, changes nothing. If you changed
+  any photo, it asks before throwing the changes away.
 - If no photo could be classified, a report opens instead of the review
   window: each photo's error, and the summary.
 - **About** shows the Slint attribution its license asks for.

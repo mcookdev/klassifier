@@ -88,6 +88,21 @@ impl Item {
         self.labels.iter().filter(|l| self.keeps(l)).count()
     }
 
+    /// Ticks or unticks label `k`. The first edit starts from the suggestions, so the other
+    /// labels keep what they showed. An item stays edited even with every label unticked.
+    pub fn toggle(&mut self, k: usize) {
+        if k >= self.labels.len() {
+            return;
+        }
+        if !self.edited {
+            for label in &mut self.labels {
+                label.chosen = label.suggested;
+            }
+            self.edited = true;
+        }
+        self.labels[k].chosen = !self.labels[k].chosen;
+    }
+
     /// "3 Keywords", "1 Keyword", "0 Keywords", "2 Keywords (edited)", as `Review.itemStatus`.
     pub fn status(&self) -> String {
         let text = plural(self.keyword_count(), "Keyword");
@@ -228,6 +243,50 @@ pub fn write_result(out: &mut impl Write, outcome: Outcome, items: &[Item]) -> i
 /// Grid lines needed for `count` cells, `columns` across.
 pub fn grid_rows(count: usize, columns: usize) -> usize {
     count.div_ceil(columns.max(1))
+}
+
+/// A keyboard move of the selected photo in the grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Move {
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    /// Up or down this many lines (at least one), staying in the column.
+    PageUp(usize),
+    PageDown(usize),
+}
+
+/// The photo selected after `mv` from `index`, in a grid of `count` photos `columns` across.
+/// Left and right run through the lines; up and down stay in the column, except that down
+/// into a short last line lands on its last photo.
+pub fn move_selection(index: usize, mv: Move, columns: usize, count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    let columns = columns.max(1);
+    let last = count - 1;
+    let index = index.min(last);
+    let up = |i: usize| if i >= columns { i - columns } else { i };
+    let down = |i: usize| if i / columns < last / columns { (i + columns).min(last) } else { i };
+    let repeat = |mut i: usize, lines: usize, step: &dyn Fn(usize) -> usize| {
+        for _ in 0..lines.clamp(1, count) {
+            i = step(i);
+        }
+        i
+    };
+    match mv {
+        Move::Left => index.saturating_sub(1),
+        Move::Right => (index + 1).min(last),
+        Move::Up => up(index),
+        Move::Down => down(index),
+        Move::Home => 0,
+        Move::End => last,
+        Move::PageUp(lines) => repeat(index, lines, &up),
+        Move::PageDown(lines) => repeat(index, lines, &down),
+    }
 }
 
 /// A rectangle in physical pixels.

@@ -4,7 +4,8 @@
 use std::path::PathBuf;
 
 use klassifier::ui_model::{
-    grid_rows, parse_review, place_window, totals, totals_line, unescape, write_result, Item, Label, Outcome, Rect,
+    grid_rows, move_selection, parse_review, place_window, totals, totals_line, unescape, write_result, Item, Label,
+    Move, Outcome, Rect,
 };
 
 fn label(name: &str, suggested: bool) -> Label {
@@ -145,4 +146,70 @@ fn window_at_least_min_and_inside_work_area() {
     // Larger than the monitor: clamped to it.
     let r = place_window(Rect { x: 0, y: 0, w: 5000, h: 5000 }, Rect { x: 0, y: 0, w: 1000, h: 800 }, (900, 600));
     assert_eq!(r, Rect { x: 0, y: 0, w: 1000, h: 800 });
+}
+
+#[test]
+fn first_toggle_starts_from_the_suggestions() {
+    let mut it = item(vec![label("dog", true), label("cat", false), label("sofa", true)], 1);
+    it.labels[2].chosen = true; // stale input: ignored until edited
+    it.toggle(1);
+    assert!(it.edited);
+    let chosen: Vec<bool> = it.labels.iter().map(|l| l.chosen).collect();
+    assert_eq!(chosen, [true, true, true], "the untouched labels keep what they showed");
+    it.toggle(0);
+    it.toggle(2);
+    assert_eq!(it.status(), "1 Keyword (edited)");
+    // Unticking everything stays an edit: nothing is written for it.
+    it.toggle(1);
+    assert_eq!(it.status(), "0 Keywords (edited)");
+    assert!(it.edited);
+}
+
+#[test]
+fn toggle_out_of_range_changes_nothing() {
+    let mut it = item(vec![label("dog", true)], 1);
+    it.toggle(1);
+    assert!(!it.edited);
+    assert!(!it.labels[0].chosen);
+}
+
+#[test]
+fn edits_reach_the_result_and_totals() {
+    let mut items = vec![item(vec![label("dog", true), label("cat", false)], 2), item(vec![label("sea", true)], 1)];
+    items[0].toggle(1); // dog + cat on 2 photos
+    items[1].toggle(0); // nothing
+    assert_eq!(totals(&items), (4, 2));
+    let mut out = Vec::new();
+    write_result(&mut out, Outcome::Accept, &items).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert_eq!(&text.lines().collect::<Vec<_>>()[1..], ["RESULT\taccept", "EDITED\t1", "CHOSEN\t1\t1", "CHOSEN\t1\t2", "EDITED\t2"]);
+}
+
+#[test]
+fn moves_within_the_grid() {
+    // 4 across, 10 photos: rows 0-3, 4-7, 8-9.
+    let m = |from, mv| move_selection(from, mv, 4, 10);
+    assert_eq!(m(5, Move::Left), 4);
+    assert_eq!(m(4, Move::Left), 3, "left wraps to the line above");
+    assert_eq!(m(0, Move::Left), 0);
+    assert_eq!(m(3, Move::Right), 4);
+    assert_eq!(m(9, Move::Right), 9);
+    assert_eq!(m(5, Move::Up), 1);
+    assert_eq!(m(1, Move::Up), 1, "top line stays");
+    assert_eq!(m(1, Move::Down), 5);
+    assert_eq!(m(6, Move::Down), 9, "into a short last line: its last photo");
+    assert_eq!(m(9, Move::Down), 9);
+    assert_eq!(m(6, Move::Home), 0);
+    assert_eq!(m(2, Move::End), 9);
+    assert_eq!(m(1, Move::PageDown(2)), 9);
+    assert_eq!(m(9, Move::PageUp(2)), 1);
+    assert_eq!(m(5, Move::PageUp(5)), 1, "stays in its column");
+    assert_eq!(m(7, Move::PageUp(0)), 3, "a page is at least a line");
+}
+
+#[test]
+fn moves_with_nothing_or_one_column() {
+    assert_eq!(move_selection(0, Move::Down, 4, 0), 0);
+    assert_eq!(move_selection(2, Move::Down, 0, 5), 3, "zero columns counts as one");
+    assert_eq!(move_selection(7, Move::Left, 4, 5), 3, "an index past the end is clamped to the last photo first");
 }

@@ -21,16 +21,18 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 use anyhow::{bail, Context, Result};
-use ui_model::{Item, Label, Outcome, ReviewInput};
-use slint::{ComponentHandle, Model, ModelRc};
+use slint::platform::Key;
+use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString};
+use ui_model::{move_selection, Item, Label, Move, Outcome, ReviewInput};
 
 const USAGE: &str = "\
 Usage: klassifier-ui --review --in <file>
-       klassifier-ui --demo <folder> [--count <n>] [--screenshot <png>]
+       klassifier-ui --demo <folder> [--count <n>] [--select <n>] [--screenshot <png>]
 
   --review --in <file>  Review the photos in <file> (written by the plugin)
   --demo <folder>       Review the JPEGs in <folder> with made-up labels (for development);
                         --count repeats them up to <n> photos
+  --select <n>          Start with photo <n> (from 1) selected
   --screenshot <png>    Render the window off screen to <png> instead of showing it";
 
 /// Screenshot size, in pixels at scale 1.
@@ -38,6 +40,8 @@ const SCREENSHOT_SIZE: (u32, u32) = (1200, 800);
 
 struct Args {
     input: Input,
+    /// The photo selected first, from 0.
+    select: usize,
     screenshot: Option<PathBuf>,
 }
 
@@ -58,6 +62,7 @@ fn main() -> ExitCode {
 
 fn parse_args() -> Result<Args> {
     let (mut review, mut file, mut demo, mut count, mut screenshot) = (false, None, None, None, None);
+    let mut select = 0;
     let mut it = std::env::args_os().skip(1);
     while let Some(arg) = it.next() {
         match arg.to_str() {
@@ -72,6 +77,14 @@ fn parse_args() -> Result<Args> {
                         .context("--count needs a number above 0")?,
                 )
             }
+            Some("--select") => {
+                select = it
+                    .next()
+                    .and_then(|n| n.to_str().and_then(|s| s.parse().ok()))
+                    .filter(|&n: &usize| n > 0)
+                    .context("--select needs a number above 0")?
+                    - 1
+            }
             Some("--screenshot") => screenshot = Some(PathBuf::from(it.next().context("--screenshot needs a file")?)),
             _ => bail!("unknown argument {}\n\n{USAGE}", arg.to_string_lossy()),
         }
@@ -81,7 +94,7 @@ fn parse_args() -> Result<Args> {
         (false, None, Some(dir)) => Input::Demo(dir, count.unwrap_or(0)),
         _ => bail!("give --review --in <file>, or --demo <folder>\n\n{USAGE}"),
     };
-    Ok(Args { input, screenshot })
+    Ok(Args { input, select, screenshot })
 }
 
 fn run() -> Result<()> {
@@ -96,23 +109,30 @@ fn run() -> Result<()> {
     if input.items.is_empty() {
         bail!("no photos to review");
     }
+    let select = args.select.min(input.items.len() - 1);
     if let Some(png) = &args.screenshot {
-        return screenshot(input, png);
+        return screenshot(input, select, png);
     }
-    let (outcome, items) = review(input)?;
+    let (outcome, items) = review(input, select)?;
     ui_model::write_result(&mut io::stdout().lock(), outcome, &items)?;
     Ok(())
 }
 
-/// Builds the window for `input`. `threaded`: load thumbnails on worker threads (false for
-/// screenshots, which have no event loop to deliver them).
-fn build(input: ReviewInput, threaded: bool) -> Result<(ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Outcome>>)> {
+/// Builds the window for `input`, with photo `select` in the side panel. `threaded`: load
+/// images on worker threads (false for screenshots, which have no event loop to deliver them).
+fn build(
+    input: ReviewInput,
+    select: usize,
+    threaded: bool,
+) -> Result<(ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Outcome>>)> {
     let ui = ReviewWindow::new()?;
     let items = Rc::new(RefCell::new(input.items));
     let model = grid::GridModel::new(items.clone(), &ui, threaded);
     ui.set_rows(ModelRc::from(model.clone() as Rc<dyn Model<Data = GridRow>>));
-    ui.set_totals(ui_model::totals_line(&items.borrow()).into());
     ui.set_notes(input.notes.into());
+    show_totals(&ui, &items.borrow());
+    ui.set_selected(select as i32);
+    model.show_panel(&ui, select);
 
     let outcome = Rc::new(StdCell::new(Outcome::Cancel));
     let finish = |result: Outcome| {
@@ -126,21 +146,108 @@ fn build(input: ReviewInput, threaded: bool) -> Result<(ReviewWindow, Rc<RefCell
     };
     ui.on_accept_all(finish(Outcome::Accept));
     ui.on_cancel(finish(Outcome::Cancel));
-    {
-        let weak = ui.as_weak();
-        ui.on_columns_changed(move |columns| {
-            if let Some(ui) = weak.upgrade() {
-                model.set_scale(ui.window().scale_factor());
+
+    let weak = ui.as_weak();
+    let m = model.clone();
+    ui.on_columns_changed(move |columns| {
+        if let Some(ui) = weak.upgrade() {
+            m.set_scale(ui.window().scale_factor());
+        }
+        m.set_columns(columns.max(1) as usize);
+    });
+
+    let weak = ui.as_weak();
+    let m = model.clone();
+    ui.on_select(move |index| {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_selected(index);
+            m.show_panel(&ui, index as usize);
+        }
+    });
+
+    let (weak, m, its) = (ui.as_weak(), model.clone(), items.clone());
+    ui.on_toggle(move |k| {
+        let Some(ui) = weak.upgrade() else { return };
+        let index = ui.get_selected() as usize;
+        its.borrow_mut()[index].toggle(k as usize);
+        m.item_changed(index);
+        m.update_panel_labels(&ui, index);
+        show_totals(&ui, &its.borrow());
+    });
+
+    let (weak, its) = (ui.as_weak(), items.clone());
+    ui.on_key(move |text| {
+        let Some(ui) = weak.upgrade() else { return false };
+        if let Some(mv) = key_move(&text, ui.get_visible_rows().max(1) as usize) {
+            let from = ui.get_selected() as usize;
+            let to = move_selection(from, mv, model.columns(), its.borrow().len());
+            if to != from {
+                ui.invoke_select(to as i32);
             }
-            model.set_columns(columns.max(1) as usize);
-        });
-    }
+            ui.invoke_scroll_to_selected();
+            return true;
+        }
+        match label_key(&text) {
+            Some(k) if k < its.borrow()[ui.get_selected() as usize].labels.len() => {
+                ui.invoke_toggle(k as i32);
+                true
+            }
+            _ => false,
+        }
+    });
     Ok((ui, items, outcome))
 }
 
-/// Shows the window until the user decides. Closing it counts as Cancel.
-fn review(input: ReviewInput) -> Result<(Outcome, Vec<Item>)> {
-    let (ui, items, outcome) = build(input, true)?;
+fn show_totals(ui: &ReviewWindow, items: &[Item]) {
+    ui.set_totals(ui_model::totals_line(items).into());
+    ui.set_edited_count(items.iter().filter(|item| item.edited).count() as i32);
+}
+
+/// The grid move for a key, if it is one. `page`: grid lines per Page Up / Page Down.
+fn key_move(text: &str, page: usize) -> Option<Move> {
+    let is = |key: Key| text == SharedString::from(key).as_str();
+    Some(if is(Key::LeftArrow) {
+        Move::Left
+    } else if is(Key::RightArrow) {
+        Move::Right
+    } else if is(Key::UpArrow) {
+        Move::Up
+    } else if is(Key::DownArrow) {
+        Move::Down
+    } else if is(Key::Home) {
+        Move::Home
+    } else if is(Key::End) {
+        Move::End
+    } else if is(Key::PageUp) {
+        Move::PageUp(page)
+    } else if is(Key::PageDown) {
+        Move::PageDown(page)
+    } else {
+        return None;
+    })
+}
+
+/// The label a key ticks: 1-9 the first nine, 0 the tenth.
+fn label_key(text: &str) -> Option<usize> {
+    match text.chars().collect::<Vec<_>>()[..] {
+        ['0'] => Some(9),
+        [c @ '1'..='9'] => Some(c as usize - '1' as usize),
+        _ => None,
+    }
+}
+
+/// Shows the window until the user decides. Closing it counts as Cancel, after asking if
+/// anything was changed.
+fn review(input: ReviewInput, select: usize) -> Result<(Outcome, Vec<Item>)> {
+    let (ui, items, outcome) = build(input, select, true)?;
+    let weak = ui.as_weak();
+    ui.window().on_close_requested(move || match weak.upgrade() {
+        Some(ui) if ui.get_edited_count() > 0 => {
+            ui.invoke_request_cancel();
+            CloseRequestResponse::KeepWindowShown
+        }
+        _ => CloseRequestResponse::HideWindow,
+    });
     win::place(ui.window());
     ui.run()?;
     let items = items.borrow().clone();
@@ -188,7 +295,7 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
 }
 
 /// Renders the window off screen with the software renderer and saves it as a PNG.
-fn screenshot(input: ReviewInput, png: &Path) -> Result<()> {
+fn screenshot(input: ReviewInput, select: usize, png: &Path) -> Result<()> {
     use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
     use slint::Rgb8Pixel;
     use slint::platform::{Platform, WindowAdapter};
@@ -205,7 +312,7 @@ fn screenshot(input: ReviewInput, png: &Path) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("cannot set the off-screen platform: {e}"))?;
     let (w, h) = SCREENSHOT_SIZE;
     window.set_size(slint::PhysicalSize::new(w, h));
-    let (ui, _items, _outcome) = build(input, false)?;
+    let (ui, _items, _outcome) = build(input, select, false)?;
     ui.show()?;
 
     let mut pixels = vec![Rgb8Pixel::default(); (w * h) as usize];

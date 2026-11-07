@@ -1,8 +1,9 @@
 --[[----------------------------------------------------------------------------
   Review.lua
   The review window: klassifier-ui.exe shows the classified photos in a scrolling grid
-  with their suggested keywords, and Accept All / Cancel. This module writes its input,
-  runs it and reads back the result (format in klassifier/src/ui_model.rs).
+  with their suggested keywords, a side panel to change a photo's keywords, and
+  Accept All / Cancel. This module writes its input, runs it and reads back the
+  result, including the changes (format in klassifier/src/ui_model.rs).
 
   An item is one classified file:
     { path, name, photos = { LrPhoto... },   -- photos sharing the file, original first

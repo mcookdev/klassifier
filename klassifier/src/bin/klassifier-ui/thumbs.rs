@@ -43,15 +43,30 @@ fn is_file(path: &Path) -> bool {
     !path.as_os_str().is_empty() && path.is_file()
 }
 
+/// What an image is for: a grid cell, or the side panel's larger picture of a photo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Slot {
+    Cell(usize),
+    Panel(usize),
+}
+
+impl Slot {
+    pub fn index(self) -> usize {
+        match self {
+            Slot::Cell(i) | Slot::Panel(i) => i,
+        }
+    }
+}
+
 pub struct Loaded {
-    pub index: usize,
+    pub slot: Slot,
     pub quality: Quality,
     /// None when no file could be loaded.
     pub buffer: Option<SharedPixelBuffer<Rgba8Pixel>>,
 }
 
 struct Job {
-    index: usize,
+    slot: Slot,
     paths: Paths,
     /// Longest edge to decode to, in physical pixels.
     edge: u32,
@@ -61,8 +76,8 @@ struct Shared {
     /// Served newest first, so the rows on screen load before ones scrolled past.
     jobs: Mutex<Vec<Job>>,
     ready: Condvar,
-    /// Photos shown with less than Lightroom's thumbnail: index -> (what they have, job to rerun).
-    watched: Mutex<HashMap<usize, (Quality, Job)>>,
+    /// Images shown with less than Lightroom's thumbnail: slot -> (what they have, job to rerun).
+    watched: Mutex<HashMap<Slot, (Quality, Job)>>,
 }
 
 pub struct ThumbLoader {
@@ -96,7 +111,7 @@ impl ThumbLoader {
             std::thread::sleep(WATCH_INTERVAL);
             let better: Vec<Job> = {
                 let mut watched = watcher.watched.lock().unwrap();
-                let ready: Vec<usize> =
+                let ready: Vec<Slot> =
                     watched.iter().filter(|(_, (have, job))| job.paths.best() > *have).map(|(i, _)| *i).collect();
                 ready.into_iter().filter_map(|i| watched.remove(&i).map(|(_, job)| job)).collect()
             };
@@ -108,18 +123,18 @@ impl ThumbLoader {
         ThumbLoader { shared }
     }
 
-    pub fn request(&self, index: usize, paths: Paths, edge: u32) {
-        self.shared.jobs.lock().unwrap().push(Job { index, paths, edge });
+    pub fn request(&self, slot: Slot, paths: Paths, edge: u32) {
+        self.shared.jobs.lock().unwrap().push(Job { slot, paths, edge });
         self.shared.ready.notify_one();
     }
 
-    /// Reloads `index` once a better file than `have` appears.
-    pub fn watch(&self, index: usize, paths: Paths, have: Quality, edge: u32) {
-        self.shared.watched.lock().unwrap().insert(index, (have, Job { index, paths, edge }));
+    /// Reloads `slot` once a better file than `have` appears.
+    pub fn watch(&self, slot: Slot, paths: Paths, have: Quality, edge: u32) {
+        self.shared.watched.lock().unwrap().insert(slot, (have, Job { slot, paths, edge }));
     }
 
-    pub fn unwatch(&self, index: usize) {
-        self.shared.watched.lock().unwrap().remove(&index);
+    pub fn unwatch(&self, slot: Slot) {
+        self.shared.watched.lock().unwrap().remove(&slot);
     }
 }
 
@@ -127,11 +142,11 @@ fn load(job: &Job) -> Loaded {
     for (quality, path) in [(Quality::Rendered, &job.paths.rendered), (Quality::Standin, &job.paths.standin)] {
         if is_file(path) {
             if let Ok(buffer) = decode(path, job.edge) {
-                return Loaded { index: job.index, quality, buffer: Some(buffer) };
+                return Loaded { slot: job.slot, quality, buffer: Some(buffer) };
             }
         }
     }
-    Loaded { index: job.index, quality: Quality::Missing, buffer: None }
+    Loaded { slot: job.slot, quality: Quality::Missing, buffer: None }
 }
 
 fn decode(path: &Path, edge: u32) -> Result<SharedPixelBuffer<Rgba8Pixel>> {
@@ -141,6 +156,6 @@ fn decode(path: &Path, edge: u32) -> Result<SharedPixelBuffer<Rgba8Pixel>> {
 }
 
 /// Decodes `paths` on the calling thread (for `--screenshot`, which has no event loop).
-pub fn load_now(index: usize, paths: Paths, edge: u32) -> Loaded {
-    load(&Job { index, paths, edge })
+pub fn load_now(slot: Slot, paths: Paths, edge: u32) -> Loaded {
+    load(&Job { slot, paths, edge })
 }
