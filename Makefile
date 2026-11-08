@@ -28,7 +28,7 @@ download = mkdir -p $(@D) && curl -fL --retry 3 -o $@.part $(1) && mv $@.part $@
 # $(call extract,<zip>,<member>): copy one file out of a .nupkg (a zip) to $@.
 extract = mkdir -p $(@D) && python3 -I -c 'import sys, zipfile; open(sys.argv[3], "wb").write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' $(1) $(2) $@
 
-.PHONY: all build lint test fetch check-version deploy ui-demo clean
+.PHONY: all build lint test clippy-windows fetch check-version deploy ui-demo clean
 
 all: deploy
 
@@ -46,7 +46,13 @@ lint:
 # Without the `ui` feature: Slint needs system libraries to build on Linux, and the review
 # window's logic (src/ui_model.rs) is in the lib, which is tested either way.
 test: lint
+	cd klassifier && cargo fmt --check
+	cd klassifier && cargo clippy --target $(LINUX) --no-default-features --all-targets -- -D warnings
 	cd klassifier && cargo test --target $(LINUX) --no-default-features
+
+# The Windows build, the review window and cfg(windows) code included, which `make test` skips.
+clippy-windows:
+	cd klassifier && cargo clippy --release --all-targets -- -D warnings
 
 fetch: $(ASSETS)
 
@@ -78,7 +84,7 @@ check-version:
 	tools/check-version.sh $(PLUGIN) "$(DEPLOY_DIR)/$(PLUGIN)"
 
 # rsync only copies changed files, so the large model files are copied once.
-deploy: check-version lint build fetch
+deploy: check-version lint clippy-windows build fetch
 	mkdir -p "$(DEPLOY_DIR)/$(PLUGIN)"
 	rsync -rt --delete --exclude=.cache --exclude=.deployed-version "$(PLUGIN)/" "$(VENDOR)/" "$(EXE)" "$(EXE_UI)" \
 		LICENSE THIRD_PARTY_NOTICES.md licenses "$(DEPLOY_DIR)/$(PLUGIN)/"

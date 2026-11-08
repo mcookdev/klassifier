@@ -199,11 +199,10 @@ struct Closed {
     window: Option<Geometry>,
 }
 
-fn build(
-    input: ReviewInput,
-    select: usize,
-    threaded: bool,
-) -> Result<(ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>)> {
+/// The review window, its items and how it closed (see build).
+type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>);
+
+fn build(input: ReviewInput, select: usize, threaded: bool) -> Result<Built> {
     let ui = ReviewWindow::new()?;
     let items = Rc::new(RefCell::new(input.items));
     let model = grid::GridModel::new(items.clone(), &ui, threaded);

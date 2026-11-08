@@ -113,6 +113,8 @@ fn load_raw_file(path: &Path) -> Result<Loaded> {
     Ok(Loaded { image, source, orientation })
 }
 
+type Extract = fn(&dyn Decoder, &RawSource, &RawDecodeParams) -> rawler::Result<Option<DynamicImage>>;
+
 /// Tries the embedded preview, full-size and thumbnail images in that order. Returns the
 /// first one that is at least `GOOD_ENOUGH_EDGE` on its long edge, else the largest found.
 fn largest_embedded_image(
@@ -120,7 +122,7 @@ fn largest_embedded_image(
     src: &RawSource,
     params: &RawDecodeParams,
 ) -> Result<(DynamicImage, Source)> {
-    let candidates: [(Source, fn(&dyn Decoder, &RawSource, &RawDecodeParams) -> _); 3] = [
+    let candidates: [(Source, Extract); 3] = [
         (Source::Preview, |d, s, p| d.preview_image(s, p)),
         (Source::Full, |d, s, p| d.full_image(s, p)),
         (Source::Thumbnail, |d, s, p| d.thumbnail_image(s, p)),

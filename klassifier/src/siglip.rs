@@ -477,7 +477,7 @@ fn read_cache(path: &Path, rows: usize) -> Option<Array2<f32>> {
     if magic != CACHE_MAGIC || cached_rows != rows || data.len() != rows * dim * 4 {
         return None;
     }
-    let values = data.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+    let values = data.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
     Array2::from_shape_vec((rows, dim), values).ok()
 }
 
