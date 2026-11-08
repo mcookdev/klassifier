@@ -15,6 +15,7 @@ use anyhow::{anyhow, ensure, Context, Result};
 use image::imageops::FilterType;
 use image::DynamicImage;
 use ndarray::{Array2, Array4, ArrayView1, Ix2};
+use ort::environment::Environment;
 use ort::ep;
 use ort::session::Session;
 use ort::value::TensorRef;
@@ -81,8 +82,8 @@ impl Backend {
     }
 }
 
-/// Loads ONNX Runtime from `dir`. Call once, before creating a `Classifier`.
-pub fn init_runtime(dir: &Path) -> Result<()> {
+/// Loads ONNX Runtime from `dir`. Call once; the `Classifier` is created in the environment returned.
+pub fn init_runtime(dir: &Path) -> Result<Environment> {
     let directml = dir.join("DirectML.dll");
     if directml.is_file() {
         // Load ours before ONNX Runtime asks for it, so an older copy in System32 isn't used.
@@ -93,8 +94,8 @@ pub fn init_runtime(dir: &Path) -> Result<()> {
     ensure!(library.is_file(), "{} not found (run `make fetch` and `make deploy`)", library.display());
     ort::init_from(&library)
         .map_err(|e| anyhow!("cannot load {}: {e}", library.display()))?
-        .commit();
-    Ok(())
+        .build()
+        .map_err(ort_error)
 }
 
 /// One label's result for a photo.
@@ -150,16 +151,16 @@ pub struct Classifier {
 
 impl Classifier {
     /// Loads the vision model and the label embeddings (from `cache_dir` when possible).
-    pub fn new(files: &ModelFiles, labels: Vec<String>, cache_dir: &Path, use_gpu: bool) -> Result<Self> {
+    pub fn new(env: &Environment, files: &ModelFiles, labels: Vec<String>, cache_dir: &Path, use_gpu: bool) -> Result<Self> {
         ensure!(!labels.is_empty(), "no labels to classify with");
-        let (vision, backend) = open_session(&files.vision, use_gpu)?;
+        let (vision, backend) = open_session(env, &files.vision, use_gpu)?;
         check_io(&vision, "pixel_values")?;
 
         let cache = cache_dir.join(format!("klassifier-siglip-{:016x}.bin", cache_key(files, &labels)?));
         let (label_embeddings, labels_from_cache) = match read_cache(&cache, labels.len()) {
             Some(embeddings) => (embeddings, true),
             None => {
-                let embeddings = embed_labels(files, &labels, use_gpu)?;
+                let embeddings = embed_labels(env, files, &labels, use_gpu)?;
                 if let Err(e) = write_cache(&cache, &embeddings) {
                     eprintln!("warning: cannot write {}: {e:#}", cache.display());
                 }
@@ -325,7 +326,7 @@ pub fn preprocess(image: &DynamicImage) -> Array4<f32> {
     pixels
 }
 
-fn embed_labels(files: &ModelFiles, labels: &[String], use_gpu: bool) -> Result<Array2<f32>> {
+fn embed_labels(env: &Environment, files: &ModelFiles, labels: &[String], use_gpu: bool) -> Result<Array2<f32>> {
     let mut tokenizer = Tokenizer::from_file(&files.tokenizer)
         .map_err(|e| anyhow!("cannot load {}: {e}", files.tokenizer.display()))?;
     tokenizer.with_padding(Some(PaddingParams {
@@ -338,7 +339,7 @@ fn embed_labels(files: &ModelFiles, labels: &[String], use_gpu: bool) -> Result<
         .with_truncation(Some(TruncationParams { max_length: TEXT_TOKENS, ..Default::default() }))
         .map_err(|e| anyhow!("cannot configure tokenizer: {e}"))?;
 
-    let (mut text_model, _) = open_session(&files.text, use_gpu)?;
+    let (mut text_model, _) = open_session(env, &files.text, use_gpu)?;
     check_io(&text_model, "input_ids")?;
 
     let mut rows: Vec<f32> = Vec::new();
@@ -364,20 +365,20 @@ fn embed_labels(files: &ModelFiles, labels: &[String], use_gpu: bool) -> Result<
     Ok(Array2::from_shape_vec((labels.len(), dim), rows)?)
 }
 
-fn open_session(model: &Path, use_gpu: bool) -> Result<(Session, Backend)> {
+fn open_session(env: &Environment, model: &Path, use_gpu: bool) -> Result<(Session, Backend)> {
     ensure!(model.is_file(), "model file {} not found (run `make fetch` and `make deploy`)", model.display());
     if use_gpu {
-        match build_session(model, true) {
+        match build_session(env, model, true) {
             Ok(session) => return Ok((session, Backend::DirectML)),
             Err(e) => eprintln!("warning: DirectML unavailable, using the CPU: {e:#}"),
         }
     }
-    let session = build_session(model, false).with_context(|| format!("cannot load {}", model.display()))?;
+    let session = build_session(env, model, false).with_context(|| format!("cannot load {}", model.display()))?;
     Ok((session, Backend::Cpu))
 }
 
-fn build_session(model: &Path, gpu: bool) -> Result<Session> {
-    let mut builder = Session::builder().map_err(ort_error)?;
+fn build_session(env: &Environment, model: &Path, gpu: bool) -> Result<Session> {
+    let mut builder = Session::builder(env).map_err(ort_error)?;
     if gpu {
         // DirectML doesn't support memory patterns or parallel execution.
         builder = builder

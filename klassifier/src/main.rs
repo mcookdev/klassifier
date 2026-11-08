@@ -155,9 +155,9 @@ fn load_classifier(args: &Args) -> Result<(Classifier, HashMap<String, Vec<Strin
         args.labels.clone()
     };
     let set = siglip::read_labels(&label_files)?;
-    siglip::init_runtime(dir)?;
+    let env = siglip::init_runtime(dir)?;
     let files = ModelFiles::in_dir(&dir.join("models").join("siglip"));
-    let classifier = Classifier::new(&files, set.labels, &std::env::temp_dir(), args.use_gpu)?;
+    let classifier = Classifier::new(&env, &files, set.labels, &std::env::temp_dir(), args.use_gpu)?;
     Ok((classifier, set.keywords, started.elapsed().as_millis()))
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "klassifier"
-version = "2.9.2"
+version = "2.9.3"
 edition = "2021"
 license = "MIT"
 
@@ -21,7 +21,7 @@ ndarray = "0.17.2"
 # load-dynamic: onnxruntime.dll is loaded at runtime from next to the exe (Microsoft's
 # prebuilt DLLs are MSVC, so they can't be linked into this MinGW build). api-24 matches
 # ONNX Runtime 1.24, the last release with a DirectML package (see ORT_VERSION in Makefile).
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic", "directml", "api-24"] }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "load-dynamic", "directml", "api-24"] }
 rawler = "0.8.0"
 # FemtoVG (OpenGL), falling back to the software renderer if OpenGL isn't available.
 slint = { version = "1.18.1", optional = true, default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software"] }
