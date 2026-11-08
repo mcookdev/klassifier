@@ -1,0 +1,60 @@
+# Checks both platforms on every push, so a change made on one host can't silently break the
+# other. Each job runs what `make test`, `make clippy` and `make build` run on that platform's
+# own host (mk/macos.mk, mk/windows.mk); deploying stays local. Neither job needs `make fetch`:
+# the tests use neither ONNX Runtime nor the model.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: klassifier
+      # The Makefile checks downloads with sha256sum, which older macOS images may lack.
+      - run: command -v sha256sum || brew install coreutils
+      # Lua syntax (luac 5.1, built from source), rustfmt, clippy and the tests.
+      - run: make test
+      - run: make clippy
+      # The binaries and Klassifier.app, ad-hoc signed.
+      - run: make build
+
+  windows:
+    # Cross-compiled with MinGW, as in WSL. The tests run on Linux (mk/windows.mk);
+    # `make clippy` checks the Windows build, the review window included.
+    name: Windows (MinGW cross-compile)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 lua5.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-gnu
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: klassifier
+      - run: make test
+      - run: make clippy
+      - run: make build
