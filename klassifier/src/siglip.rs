@@ -5,7 +5,7 @@
 //! asked for the one Windows ranks as high-performance.
 //!
 //! Label embeddings come from the text model, which is only needed when the labels change:
-//! they are cached in a file keyed by the labels and model files.
+//! they are cached in a file keyed by the labels and the model files' sizes and times.
 
 use std::collections::HashMap;
 use std::fs;
@@ -163,8 +163,9 @@ impl Classifier {
             Some(embeddings) => (embeddings, true),
             None => {
                 let embeddings = embed_labels(env, files, &labels, use_gpu)?;
-                if let Err(e) = write_cache(&cache, &embeddings) {
-                    eprintln!("warning: cannot write {}: {e:#}", cache.display());
+                match write_cache(&cache, &embeddings) {
+                    Ok(()) => remove_stale_caches(cache_dir, &cache),
+                    Err(e) => eprintln!("warning: cannot write {}: {e:#}", cache.display()),
                 }
                 (embeddings, false)
             }
@@ -458,14 +459,32 @@ fn cache_key(files: &ModelFiles, labels: &[String]) -> Result<u64> {
     };
     feed(&CACHE_VERSION.to_le_bytes());
     for path in [&files.text, &files.tokenizer] {
-        let len = fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?.len();
-        feed(&len.to_le_bytes());
+        let context = || format!("cannot read {}", path.display());
+        let meta = fs::metadata(path).with_context(context)?;
+        let modified = meta.modified().with_context(context)?;
+        // A replaced model file can keep its length, so the modification time is part of the key too.
+        let nanos = modified.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        feed(&meta.len().to_le_bytes());
+        feed(&nanos.to_le_bytes());
     }
     for label in labels {
         feed(prompt(label).as_bytes());
         feed(b"\n");
     }
     Ok(hash)
+}
+
+/// Deletes the other label caches in `dir`: every change to the labels or the model files
+/// makes a new one, and the old ones would pile up. Failures are ignored, this is only cleanup.
+fn remove_stale_caches(dir: &Path, keep: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("klassifier-siglip-") && name.ends_with(".bin") && entry.path() != keep {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn read_cache(path: &Path, rows: usize) -> Option<Array2<f32>> {
@@ -499,6 +518,34 @@ fn write_cache(path: &Path, embeddings: &Array2<f32>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_key_changes_with_mtime_at_the_same_length() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("text_model.onnx"), "t").unwrap();
+        fs::write(dir.path().join("tokenizer.json"), "tok").unwrap();
+        let files = ModelFiles::in_dir(dir.path());
+        let labels = vec!["dog".to_string()];
+        let before = cache_key(&files, &labels).unwrap();
+        let file = fs::File::options().write(true).open(&files.text).unwrap();
+        file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000)).unwrap();
+        assert_eq!(fs::metadata(&files.text).unwrap().len(), 1);
+        assert_ne!(cache_key(&files, &labels).unwrap(), before);
+    }
+
+    #[test]
+    fn stale_caches_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["klassifier-siglip-00000000000000aa.bin", "klassifier-siglip-00000000000000bb.bin", "other.bin"] {
+            fs::write(dir.path().join(name), "x").unwrap();
+        }
+        let keep = dir.path().join("klassifier-siglip-00000000000000bb.bin");
+        remove_stale_caches(dir.path(), &keep);
+        let mut left: Vec<_> =
+            fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["klassifier-siglip-00000000000000bb.bin", "other.bin"]);
+    }
 
     #[test]
     fn rank_orders_by_score_and_shares_sum_to_one() {
