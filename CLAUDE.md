@@ -13,6 +13,8 @@ With every build (any change to the plugin, the app, docs or build tooling), and
   matches the change: `major` for breaking changes, `minor` for new features, `revision` for
   bug fixes and everything else (docs, build tooling). Reset the lower parts to 0 when
   bumping a higher one.
+- `make bump` does both edits (`make bump PART=minor` or `PART=major` for the higher
+  parts; `tools/bump-version.sh`).
 - `make deploy` enforces this (`tools/check-version.sh`): it fails if `Info.lua` and
   `Cargo.toml` disagree, or the version and build aren't both newer than the deployed
   ones. Bump the version; never work around the check.

@@ -37,7 +37,7 @@ download = mkdir -p $(@D) && curl -fL --retry 3 -o $@.part $(1) && \
 # $(call extract,<zip>,<member>): copy one file out of a .nupkg (a zip) to $@.
 extract = mkdir -p $(@D) && python3 -I -c 'import sys, zipfile; open(sys.argv[3], "wb").write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' $(1) $(2) $@
 
-.PHONY: all build lint test clippy-windows fetch check-version deploy ui-demo clean
+.PHONY: all bump build lint test clippy-windows fetch check-version deploy ui-demo clean
 
 all: deploy
 
@@ -88,6 +88,12 @@ $(MODEL_DIR)/text_model.onnx:
 
 $(MODEL_DIR)/tokenizer.json:
 	$(call download,$(SIGLIP_URL)/$(@F),$(TOKENIZER_SHA256))
+
+# `make bump` (bug fixes, docs, tooling), `make bump PART=minor` (features) or PART=major:
+# the next version in Info.lua and Cargo.toml, build + 1.
+PART ?= revision
+bump:
+	tools/bump-version.sh $(PART)
 
 # Every build gets a new version (CLAUDE.md): deploying the last deployed version, or one
 # where Info.lua and Cargo.toml disagree, fails here. The version is recorded once the copy
