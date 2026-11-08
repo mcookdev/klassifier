@@ -263,15 +263,25 @@ The model can only choose among the labels it's given. If a photo gets an odd
 label (backstage makeup coming out as "halloween"), the list probably has
 nothing closer. The fix is to add a label that describes it.
 
-- **Label sets** are the `.txt` files in `Klassifier.lrplugin/label-sets/`,
-  one label per line, with `#` comments. Each label is also the name of the
-  keyword it becomes, so the sets spell labels the way keywords should look
-  (Title Case: `Bird in Flight`, `QR Code`). Case and punctuation don't
-  matter to the model, which lowercases every label and drops punctuation
-  (`Close-Up` and `closeup` are the same label to it), so changing them
-  never changes the scores. To add a set, add a file and run
-  `make deploy`. It then appears in the dialog's **Label set** menu. The
-  plugin comes with:
+- **Label sets** are `.txt` files, one label per line, with `#` comments.
+  Each label is also the name of the keyword it becomes, so the sets spell
+  labels the way keywords should look (Title Case: `Bird in Flight`,
+  `QR Code`). Case and punctuation don't matter to the model, which
+  lowercases every label and drops punctuation (`Close-Up` and `closeup` are
+  the same label to it), so changing them never changes the scores.
+- **Your own label sets** go in the `Klassifier Label Sets` folder in
+  Lightroom's app data folder (`~/Library/Application Support/Adobe/Lightroom/`
+  on macOS, `%APPDATA%\Adobe\Lightroom\` on Windows). The folder button next to
+  the **Label set** menu opens it, and creates it the first time. Add or edit
+  files there at any time, even with the dialog open: the menu lists the
+  folder again each time it opens. Plugin updates leave this folder alone.
+  A set of yours with the same name as a built-in one replaces it, so to
+  change a built-in set, copy it from `Klassifier.lrplugin/label-sets/` into
+  your folder and edit the copy. Your copy then won't get the plugin's later
+  changes to that set.
+- **The built-in sets** are in `Klassifier.lrplugin/label-sets/`, which is
+  replaced with each plugin update. To ship a new built-in set, add a file
+  there and run `make deploy`. The plugin comes with:
   - **General** (the default): a bit of everything.
   - **Nature**: birds and other wildlife, sea life, insects, flowers,
     landscapes (volcanoes, lava, coast, waterfalls) and weather.

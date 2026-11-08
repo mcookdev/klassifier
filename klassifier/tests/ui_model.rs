@@ -1,14 +1,14 @@
 //! Review window data: the exchange format with the plugin, and the texts the window shows.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use klassifier::ui_model::{
-    append_line, apply_answer, center_window, escape, grid_rows, lightroom_gone, move_selection, options_problem,
-    parse_answer, parse_hints, parse_options, parse_report, parse_review, place_window, restore_window, totals,
-    totals_line, unescape, write_options_result, write_result, Geometry, Item, Label, LineReader, Move, OptionsChoice,
-    Outcome, Rect, Save, SaveFiles,
+    append_line, apply_answer, center_window, escape, grid_rows, lightroom_gone, list_label_sets, move_selection,
+    options_problem, parse_answer, parse_hints, parse_options, parse_report, parse_review, place_window,
+    restore_window, totals, totals_line, unescape, write_options_result, write_result, Geometry, Item, Label,
+    LineReader, Move, OptionsChoice, Outcome, Rect, Save, SaveFiles,
 };
 
 fn label(name: &str, suggested: bool) -> Label {
@@ -335,13 +335,12 @@ fn restored_window_kept_on_its_monitor() {
     assert_eq!(restore_window(Rect { x: 1800, y: -50, w: 4000, h: 3000 }, work, min), work);
 }
 
-const OPTIONS: &str = "#klassifier-ui\toptions\t1\n\
+const OPTIONS: &str = "#klassifier-ui\toptions\t2\n\
 WINDOW\t100\t200\t560\t300\t0\n\
 COUNT\t812\n\
 WARN_ABOVE\t500\n\
-SET\tGeneral\n\
-SET\tFashion\n\
-SET\tWildlife\n\
+SETDIR\tbuiltin\tC:\\plugin\\label-sets\n\
+SETDIR\tuser\tC:\\Users\\me\\Klassifier Label Sets\n\
 LABELSET\tFashion\n\
 HINTS\tmakeup, hair styling\\nbackstage\n\
 ONLYHINTS\t1\n";
@@ -351,22 +350,57 @@ fn parses_options_input() {
     let input = parse_options(OPTIONS).unwrap();
     assert_eq!(input.count, 812);
     assert_eq!(input.warn_above, 500);
-    assert_eq!(input.sets, ["General", "Fashion", "Wildlife"]);
-    assert_eq!(input.set_index, 1);
+    assert_eq!(input.builtin_dir, Path::new("C:\\plugin\\label-sets"));
+    assert_eq!(input.user_dir, Path::new("C:\\Users\\me\\Klassifier Label Sets"));
+    assert_eq!(input.label_set.as_deref(), Some("Fashion"));
     assert_eq!(input.hints, "makeup, hair styling\nbackstage");
     assert!(input.only_hints);
     assert_eq!(input.window.unwrap().rect, Rect { x: 100, y: 200, w: 560, h: 300 });
 }
 
 #[test]
-fn options_need_sets_and_a_count() {
-    let header = "#klassifier-ui\toptions\t1\n";
-    assert!(parse_options(&format!("{header}COUNT\t3\n")).is_err(), "no label sets");
-    assert!(parse_options(&format!("{header}SET\tGeneral\n")).is_err(), "no count");
-    assert!(parse_options(&format!("{header}COUNT\tmany\nSET\tGeneral\n")).is_err(), "bad count");
-    // An unknown remembered set (deleted since) falls back to the first one.
-    let input = parse_options(&format!("{header}COUNT\t3\nSET\tGeneral\nSET\tFashion\nLABELSET\tGone\n")).unwrap();
-    assert_eq!((input.set_index, input.hints.as_str(), input.only_hints, input.warn_above), (0, "", false, 0));
+fn options_need_set_folders_and_a_count() {
+    let header = "#klassifier-ui\toptions\t2\n";
+    let dirs = "SETDIR\tbuiltin\t/p\nSETDIR\tuser\t/u\n";
+    assert!(parse_options(&format!("{header}COUNT\t3\n")).is_err(), "no folders");
+    assert!(parse_options(&format!("{header}COUNT\t3\nSETDIR\tbuiltin\t/p\n")).is_err(), "no user folder");
+    assert!(parse_options(&format!("{header}COUNT\t3\n{dirs}SETDIR\tother\t/o\n")).is_err(), "unknown folder");
+    assert!(parse_options(&format!("{header}COUNT\t3\nSETDIR\tbuiltin\t\nSETDIR\tuser\t/u\n")).is_err(), "empty");
+    assert!(parse_options(&format!("{header}{dirs}")).is_err(), "no count");
+    assert!(parse_options(&format!("{header}COUNT\tmany\n{dirs}")).is_err(), "bad count");
+    let input = parse_options(&format!("{header}COUNT\t3\n{dirs}LABELSET\t\n")).unwrap();
+    assert_eq!((input.label_set, input.hints.as_str(), input.only_hints, input.warn_above), (None, "", false, 0));
+}
+
+fn write_files(dir: &Path, names: &[&str]) {
+    fs::create_dir_all(dir).unwrap();
+    for name in names {
+        fs::write(dir.join(name), "label\n").unwrap();
+    }
+}
+
+#[test]
+fn lists_label_sets_from_both_folders() {
+    let root = tempfile::tempdir().unwrap();
+    let (builtin, user) = (root.path().join("label-sets"), root.path().join("user"));
+    write_files(&builtin, &["Nature.txt", "General.txt", "city.TXT", "notes.md", "Fashion.txt"]);
+    fs::create_dir(builtin.join("folder.txt")).unwrap();
+    // Only the built-in folder: General first, then by name ignoring case; not .md or folders.
+    let names = |sets: &[klassifier::ui_model::LabelSetEntry]| sets.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+    let sets = list_label_sets(&builtin, &user);
+    assert_eq!(names(&sets), ["General", "city", "Fashion", "Nature"]);
+    assert!(sets.iter().all(|s| !s.user));
+    assert_eq!(sets[0].path, builtin.join("General.txt"));
+
+    // A user set of the same name (ignoring case) replaces the built-in one.
+    write_files(&user, &["general.txt", "Birds.txt"]);
+    let sets = list_label_sets(&builtin, &user);
+    assert_eq!(names(&sets), ["general", "Birds", "city", "Fashion", "Nature"]);
+    assert_eq!((sets[0].path.clone(), sets[0].user), (user.join("general.txt"), true));
+    assert!(sets[1].user && !sets[2].user);
+
+    // Missing folders have no sets.
+    assert!(list_label_sets(&root.path().join("none"), &root.path().join("gone")).is_empty());
 }
 
 #[test]
@@ -378,14 +412,19 @@ fn hints_split_like_parse_hints_in_lua() {
 
 #[test]
 fn options_problems_match_lua() {
-    assert_eq!(options_problem("", false), None);
-    assert_eq!(options_problem("dog", true), None);
+    assert_eq!(options_problem("", false, true), None);
+    assert_eq!(options_problem("dog", true, true), None);
+    assert_eq!(options_problem("dog", true, false), None, "only hints: no set needed");
     assert_eq!(
-        options_problem(" , ", true).as_deref(),
+        options_problem("dog", false, false).as_deref(),
+        Some("No label sets: add a .txt file to your label sets folder (the folder button).")
+    );
+    assert_eq!(
+        options_problem(" , ", true, true).as_deref(),
         Some("Enter at least one hint, or untick \"Use only the hints\".")
     );
     assert_eq!(
-        options_problem("cat, egret => Wildlife > Bird", false).as_deref(),
+        options_problem("cat, egret => Wildlife > Bird", false, true).as_deref(),
         Some("Hints can't map to nested keywords: remove \"=>\" from \"egret => Wildlife > Bird\". Put mappings in a label set file instead.")
     );
 }
@@ -400,13 +439,18 @@ fn escape_is_undone_by_unescape() {
 
 #[test]
 fn writes_the_options_chosen() {
-    let choice = OptionsChoice { label_set: "Fashion".into(), hints: "a,\nb".into(), only_hints: false };
+    let choice = OptionsChoice {
+        label_set: "Fashion".into(),
+        label_file: PathBuf::from("/sets/Fashion.txt"),
+        hints: "a,\nb".into(),
+        only_hints: false,
+    };
     let mut out = Vec::new();
     write_options_result(&mut out, Outcome::Ok, Some(&choice), None).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert_eq!(
         &text.lines().collect::<Vec<_>>()[1..],
-        ["RESULT\tok", "LABELSET\tFashion", "HINTS\ta,\\nb", "ONLYHINTS\t0"]
+        ["RESULT\tok", "LABELSET\tFashion", "LABELFILE\t/sets/Fashion.txt", "HINTS\ta,\\nb", "ONLYHINTS\t0"]
     );
     let mut out = Vec::new();
     write_options_result(&mut out, Outcome::Cancel, None, None).unwrap();

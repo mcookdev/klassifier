@@ -26,8 +26,8 @@ use anyhow::{bail, Context, Result};
 use slint::platform::Key;
 use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use ui_model::{
-    move_selection, Geometry, Item, Label, LineReader, Move, OptionsChoice, OptionsInput, Outcome, ReportInput,
-    ReviewInput, Save, SaveFiles,
+    move_selection, Geometry, Item, Label, LabelSetEntry, LineReader, Move, OptionsChoice, OptionsInput, Outcome,
+    ReportInput, ReviewInput, Save, SaveFiles,
 };
 use win::Fit;
 
@@ -557,27 +557,60 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
 fn show_options(input: OptionsInput, screenshot_png: Option<&Path>) -> Result<()> {
     type Closed = (Outcome, Option<OptionsChoice>, Option<Geometry>);
     let closed: Rc<RefCell<Closed>> = Rc::new(RefCell::new((Outcome::Cancel, None, None)));
+    // The sets in the menu, listed again each time it opens (the user may have added some).
+    let sets: Rc<RefCell<Vec<LabelSetEntry>>> = Rc::default();
     let make = || -> Result<OptionsWindow> {
         let ui = OptionsWindow::new()?;
-        let names: Vec<SharedString> = input.sets.iter().map(|s| s.as_str().into()).collect();
-        ui.set_sets(ModelRc::new(VecModel::from(names)));
-        ui.set_set_index(input.set_index as i32);
+        let model = Rc::new(VecModel::<SharedString>::default());
+        ui.set_sets(ModelRc::from(model.clone() as Rc<dyn Model<Data = SharedString>>));
+        // Lists the sets and keeps `current` (by name, else the default set) selected.
+        let refresh = {
+            let (weak, sets, model) = (ui.as_weak(), sets.clone(), model.clone());
+            let (builtin, user) = (input.builtin_dir.clone(), input.user_dir.clone());
+            move |current: Option<String>| {
+                let Some(ui) = weak.upgrade() else { return };
+                let listed = ui_model::list_label_sets(&builtin, &user);
+                let index = current.and_then(|name| listed.iter().position(|s| s.name == name)).unwrap_or(0);
+                model.set_vec(listed.iter().map(|s| SharedString::from(s.name.as_str())).collect::<Vec<_>>());
+                ui.set_set_index(index as i32);
+                *sets.borrow_mut() = listed;
+            }
+        };
+        refresh(input.label_set.clone());
+        let (weak, s) = (ui.as_weak(), sets.clone());
+        ui.on_refresh_sets(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let current = s.borrow().get(ui.get_set_index().max(0) as usize).map(|e| e.name.clone());
+            refresh(current);
+        });
+        let user_dir = input.user_dir.clone();
+        ui.on_open_folder(move || {
+            if let Err(e) = fs::create_dir_all(&user_dir) {
+                eprintln!("cannot create {}: {e}", user_dir.display());
+                return;
+            }
+            win::open_folder(&user_dir);
+        });
         ui.set_hints(input.hints.as_str().into());
         ui.set_only_hints(input.only_hints);
         ui.set_count(input.count as i32);
         ui.set_warn_above(input.warn_above as i32);
-        ui.on_problem_with(|hints, only| ui_model::options_problem(&hints, only).unwrap_or_default().into());
+        ui.on_problem_with(|hints, only, sets| {
+            ui_model::options_problem(&hints, only, sets > 0).unwrap_or_default().into()
+        });
 
-        let (weak, c, sets) = (ui.as_weak(), closed.clone(), input.sets.clone());
+        let (weak, c, s) = (ui.as_weak(), closed.clone(), sets.clone());
         ui.on_classify(move || {
             let Some(ui) = weak.upgrade() else { return };
             let (hints, only_hints) = (ui.get_hints().to_string(), ui.get_only_hints());
-            if ui_model::options_problem(&hints, only_hints).is_some() {
+            let sets = s.borrow();
+            if ui_model::options_problem(&hints, only_hints, !sets.is_empty()).is_some() {
                 return;
             }
-            let label_set = sets.get(ui.get_set_index().max(0) as usize).unwrap_or(&sets[0]).clone();
-            *c.borrow_mut() =
-                (Outcome::Ok, Some(OptionsChoice { label_set, hints, only_hints }), win::geometry(ui.window()));
+            let chosen = sets.get(ui.get_set_index().max(0) as usize).or(sets.first());
+            let (label_set, label_file) = chosen.map(|e| (e.name.clone(), e.path.clone())).unwrap_or_default();
+            let choice = OptionsChoice { label_set, label_file, hints, only_hints };
+            *c.borrow_mut() = (Outcome::Ok, Some(choice), win::geometry(ui.window()));
             let _ = ui.hide();
         });
         let (weak, c) = (ui.as_weak(), closed.clone());

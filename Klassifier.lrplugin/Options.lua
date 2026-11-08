@@ -22,24 +22,25 @@ local Options = {}
 -- Warn in the options dialog above this many photos (e.g. a whole filmstrip with nothing selected).
 local WARN_ABOVE = 500
 
--- Label sets are the .txt files in this folder of the plugin.
-Options.LABEL_SET_DIR = 'label-sets'
-local DEFAULT_LABEL_SET = 'General'
+-- Label sets are the .txt files in two folders: the plugin's own, replaced with the plugin on
+-- every update, and the user's, which updates leave alone. A user set replaces a built-in one
+-- of the same name. klassifier-ui lists them (list_label_sets in ui_model.rs).
+local USER_LABEL_SET_DIR = 'Klassifier Label Sets'
 
--- Names of the label sets (the .txt files in Options.LABEL_SET_DIR), the default first.
-function Options.listLabelSets()
-	local names = {}
-	for file in LrFileUtils.files(LrPathUtils.child(_PLUGIN.path, Options.LABEL_SET_DIR)) do
-		local leaf = LrPathUtils.leafName(file)
-		if leaf:lower():match('%.txt$') then
-			names[#names + 1] = LrPathUtils.removeExtension(leaf)
-		end
-	end
-	table.sort(names, function(a, b)
-		if a == DEFAULT_LABEL_SET or b == DEFAULT_LABEL_SET then return a == DEFAULT_LABEL_SET end
-		return a:lower() < b:lower()
-	end)
-	return names
+function Options.builtinLabelSetDir()
+	return LrPathUtils.child(_PLUGIN.path, 'label-sets')
+end
+
+-- In Lightroom's own app data folder (on macOS ~/Library/Application Support/Adobe/Lightroom).
+function Options.userLabelSetDir()
+	return LrPathUtils.child(LrPathUtils.getStandardFilePath('appData'), USER_LABEL_SET_DIR)
+end
+
+-- Whether `path` is a file directly in `dir` (ignoring case on Windows, whose paths do).
+local function isFileIn(path, dir)
+	local parent = LrPathUtils.parent(path)
+	if WIN_ENV then parent, dir = parent and parent:lower(), dir:lower() end
+	return parent == dir and LrFileUtils.exists(path) == 'file'
 end
 
 -- "makeup, hair styling,,backstage" -> { 'makeup', 'hair styling', 'backstage' }
@@ -53,20 +54,21 @@ function Options.parseHints(text)
 end
 
 -- Shows the options dialog (klassifier-ui --options; format in ui_model.rs). Returns
--- { labelSet, hints, onlyHints }, or nil if cancelled. The choices are remembered for next time.
+-- { labelSet, labelFile, hints, onlyHints }, or nil if cancelled. The choices are remembered for next time.
 function Options.ask(context, photoCount)
 	local prefs = LrPrefs.prefsForPlugin()
-	local sets = Options.listLabelSets()
-	if #sets == 0 then
-		LrDialogs.message('Classify Photos', 'No label sets found in the plugin\'s ' .. Options.LABEL_SET_DIR .. ' folder.', 'critical')
-		return nil
+	local builtinDir, userDir = Options.builtinLabelSetDir(), Options.userLabelSetDir()
+	-- Made now so the folder button always has a folder to open. Not fatal: the button makes it too.
+	if not LrFileUtils.exists(userDir) and not LrFileUtils.createAllDirectories(userDir) then
+		logger:warn('Could not create ' .. userDir)
 	end
 
-	local input = { '#klassifier-ui\toptions\t1' }
+	local input = { '#klassifier-ui\toptions\t2' }
 	Exec.addSavedWindow(input, 'optionsWindow')
 	input[#input + 1] = 'COUNT\t' .. photoCount
 	input[#input + 1] = 'WARN_ABOVE\t' .. WARN_ABOVE
-	for _, name in ipairs(sets) do input[#input + 1] = 'SET\t' .. Exec.clean(name) end
+	input[#input + 1] = 'SETDIR\tbuiltin\t' .. Exec.clean(builtinDir)
+	input[#input + 1] = 'SETDIR\tuser\t' .. Exec.clean(userDir)
 	if prefs.labelSet then input[#input + 1] = 'LABELSET\t' .. Exec.clean(prefs.labelSet) end
 	input[#input + 1] = 'HINTS\t' .. Exec.escape(prefs.hints or '')
 	input[#input + 1] = 'ONLYHINTS\t' .. (prefs.onlyHints and 1 or 0)
@@ -91,6 +93,7 @@ function Options.ask(context, photoCount)
 		local fields = Exec.splitTabs(line)
 		if fields[1] == 'RESULT' then result = fields[2]
 		elseif fields[1] == 'LABELSET' then chosen.labelSet = fields[2]
+		elseif fields[1] == 'LABELFILE' then chosen.labelFile = fields[2]
 		elseif fields[1] == 'HINTS' then chosen.hints = Exec.unescape(fields[2])
 		elseif fields[1] == 'ONLYHINTS' then chosen.onlyHints = fields[2] == '1'
 		end
@@ -102,9 +105,10 @@ function Options.ask(context, photoCount)
 		return nil
 	end
 	if result ~= 'ok' then return nil end
-	local known = false
-	for _, name in ipairs(sets) do known = known or name == chosen.labelSet end
-	if not known or chosen.hints == nil or chosen.onlyHints == nil then
+	-- The set's file must be one of the label sets, unless only the hints are used.
+	local file = chosen.labelFile
+	local fileOk = file and (isFileIn(file, builtinDir) or isFileIn(file, userDir))
+	if chosen.hints == nil or chosen.onlyHints == nil or not (fileOk or chosen.onlyHints) then
 		logger:error('Unexpected options output:\n' .. output)
 		LrDialogs.message('Classify Photos', 'The options window gave an unexpected answer:\n' .. output:sub(1, 1000), 'critical')
 		return nil
@@ -112,7 +116,9 @@ function Options.ask(context, photoCount)
 
 	prefs.labelSet, prefs.hints, prefs.onlyHints = chosen.labelSet, chosen.hints, chosen.onlyHints
 	-- The window checks these too; kept as a backstop.
-	local options = { labelSet = chosen.labelSet, hints = Options.parseHints(chosen.hints), onlyHints = chosen.onlyHints }
+	local options = {
+		labelSet = chosen.labelSet, labelFile = file, hints = Options.parseHints(chosen.hints), onlyHints = chosen.onlyHints,
+	}
 	if options.onlyHints and #options.hints == 0 then
 		LrDialogs.message('Classify Photos', 'Enter at least one hint, or untick "Use only the hints".', 'warning')
 		return nil

@@ -13,3 +13,7 @@ pub fn monitor_of(_: Rect) -> Option<(Rect, f32)> {
 pub fn dark_menus() {}
 
 pub fn activate() {}
+
+pub fn file_browser() -> Option<&'static str> {
+    None
+}

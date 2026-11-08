@@ -155,3 +155,8 @@ fn main_window(pid: u32) -> Option<HWND> {
 
 /// Windows brings a new window to the front by itself.
 pub fn activate() {}
+
+/// File Explorer.
+pub fn file_browser() -> Option<&'static str> {
+    Some("explorer.exe")
+}

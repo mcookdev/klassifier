@@ -65,18 +65,20 @@
 //! The options dialog (`--options`) reads:
 //!
 //! ```text
-//! #klassifier-ui<TAB>options<TAB>1
+//! #klassifier-ui<TAB>options<TAB>2
 //! WINDOW<TAB>...               (optional, as for the review)
 //! COUNT<TAB><photos to classify>
 //! WARN_ABOVE<TAB><n>           (optional: above n photos, warn that it takes a while)
-//! SET<TAB><label set>          (one per label set, in menu order)
+//! SETDIR<TAB>builtin<TAB><folder>   (the label sets that come with the plugin)
+//! SETDIR<TAB>user<TAB><folder>      (the user's own; need not exist yet)
 //! LABELSET<TAB><name>          (optional: the set chosen last time)
 //! HINTS<TAB><text, escaped as NOTES>
 //! ONLYHINTS<TAB><0|1>
 //! ```
 //!
-//! and writes RESULT ok|cancel, and for ok the LABELSET, HINTS and ONLYHINTS chosen, plus a
-//! WINDOW line.
+//! The label sets are the `.txt` files in the two folders (`list_label_sets`), listed again
+//! each time the menu opens. The dialog writes RESULT ok|cancel, and for ok the LABELSET (name)
+//! and LABELFILE (path) of the set chosen, the HINTS and ONLYHINTS, plus a WINDOW line.
 //!
 //! Lines starting with `#` are informational. Readers ignore unknown lines and extra fields.
 
@@ -499,9 +501,12 @@ pub fn parse_report(text: &str) -> Result<ReportInput> {
 pub struct OptionsInput {
     pub count: usize,
     pub warn_above: usize,
-    pub sets: Vec<String>,
-    /// The remembered label set's position in `sets` (0 if it is gone).
-    pub set_index: usize,
+    /// The label sets that come with the plugin.
+    pub builtin_dir: PathBuf,
+    /// The user's own label sets, which replace built-in ones of the same name.
+    pub user_dir: PathBuf,
+    /// The set chosen last time, if any.
+    pub label_set: Option<String>,
     pub hints: String,
     pub only_hints: bool,
     pub window: Option<Geometry>,
@@ -509,7 +514,7 @@ pub struct OptionsInput {
 
 pub fn parse_options(text: &str) -> Result<OptionsInput> {
     let mut input = OptionsInput::default();
-    let (mut count, mut label_set) = (None, None);
+    let (mut count, mut builtin, mut user) = (None, None, None);
     for (n, line) in body(text, "options")? {
         let fields: Vec<&str> = line.split('\t').collect();
         let value = fields.get(1).copied().unwrap_or("");
@@ -517,19 +522,69 @@ pub fn parse_options(text: &str) -> Result<OptionsInput> {
             "WINDOW" => input.window = parse_window(&fields[1..]),
             "COUNT" => count = Some(number(value, "the photo count", n)?),
             "WARN_ABOVE" => input.warn_above = number(value, "WARN_ABOVE", n)?,
-            "SET" => input.sets.push(value.to_string()),
-            "LABELSET" => label_set = Some(value.to_string()),
+            "SETDIR" => {
+                let dir = fields.get(2).filter(|d| !d.is_empty()).map(PathBuf::from);
+                match (value, dir) {
+                    ("builtin", Some(dir)) => builtin = Some(dir),
+                    ("user", Some(dir)) => user = Some(dir),
+                    _ => bail!("line {n}: SETDIR needs builtin or user, and a folder"),
+                }
+            }
+            "LABELSET" => input.label_set = Some(value.to_string()).filter(|s| !s.is_empty()),
             "HINTS" => input.hints = unescape(value),
             "ONLYHINTS" => input.only_hints = flag(value, "ONLYHINTS", n)?,
             _ => {}
         }
     }
     input.count = count.context("no COUNT line")?;
-    if input.sets.is_empty() {
-        bail!("no label sets (SET lines)");
-    }
-    input.set_index = label_set.and_then(|name| input.sets.iter().position(|s| *s == name)).unwrap_or(0);
+    input.builtin_dir = builtin.context("no SETDIR builtin line")?;
+    input.user_dir = user.context("no SETDIR user line")?;
     Ok(input)
+}
+
+/// The set listed first, and chosen when the remembered one is gone.
+pub const DEFAULT_LABEL_SET: &str = "General";
+
+/// A label set in the menu: a `.txt` file in the built-in or the user's folder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelSetEntry {
+    /// The file name without `.txt`.
+    pub name: String,
+    pub path: PathBuf,
+    /// From the user's folder.
+    pub user: bool,
+}
+
+/// The label sets in `builtin` and `user`, in menu order: General first, then by name, ignoring
+/// case. A user set replaces a built-in one of the same name (ignoring case), so copying a
+/// built-in set into the user's folder is how to change it. A missing folder has no sets.
+pub fn list_label_sets(builtin: &Path, user: &Path) -> Vec<LabelSetEntry> {
+    let mut sets: Vec<LabelSetEntry> = Vec::new();
+    for (dir, is_user) in [(builtin, false), (user, true)] {
+        let Ok(entries) = fs::read_dir(dir) else { continue };
+        let mut found: Vec<LabelSetEntry> = entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| !t.is_dir()))
+            .filter_map(|e| {
+                let path = e.path();
+                let is_txt = path.extension().is_some_and(|x| x.eq_ignore_ascii_case("txt"));
+                let name = path.file_stem()?.to_str()?.to_string();
+                (is_txt && !name.is_empty()).then_some(LabelSetEntry { name, path, user: is_user })
+            })
+            .collect();
+        // read_dir's order varies; sorted, a name clash within a folder always resolves the same way.
+        found.sort_by(|a, b| a.path.cmp(&b.path));
+        for set in found {
+            match sets.iter_mut().find(|s| s.name.to_lowercase() == set.name.to_lowercase()) {
+                Some(same) if is_user && !same.user => *same = set,
+                Some(_) => {}
+                None => sets.push(set),
+            }
+        }
+    }
+    let key = |s: &LabelSetEntry| (!s.name.eq_ignore_ascii_case(DEFAULT_LABEL_SET), s.name.to_lowercase());
+    sets.sort_by_key(key);
+    sets
 }
 
 /// "makeup, hair styling,,backstage" -> ["makeup", "hair styling", "backstage"], as
@@ -538,8 +593,12 @@ pub fn parse_hints(text: &str) -> Vec<&str> {
     text.split([',', ';', '\r', '\n']).map(str::trim).filter(|h| !h.is_empty()).collect()
 }
 
-/// Why the options can't be used, as the plugin would say, or None if they can.
-pub fn options_problem(hints: &str, only_hints: bool) -> Option<String> {
+/// Why the options can't be used, as the plugin would say, or None if they can. `has_sets`:
+/// there is at least one label set to choose.
+pub fn options_problem(hints: &str, only_hints: bool, has_sets: bool) -> Option<String> {
+    if !only_hints && !has_sets {
+        return Some("No label sets: add a .txt file to your label sets folder (the folder button).".into());
+    }
     let hints = parse_hints(hints);
     if only_hints && hints.is_empty() {
         return Some("Enter at least one hint, or untick \"Use only the hints\".".into());
@@ -555,6 +614,8 @@ pub fn options_problem(hints: &str, only_hints: bool) -> Option<String> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptionsChoice {
     pub label_set: String,
+    /// The label set's file; empty when only the hints are used and there are no sets.
+    pub label_file: PathBuf,
     pub hints: String,
     pub only_hints: bool,
 }
@@ -570,6 +631,7 @@ pub fn write_options_result(
     writeln!(out, "RESULT\t{}", outcome.as_str())?;
     if let Some(choice) = choice {
         writeln!(out, "LABELSET\t{}", choice.label_set.replace(['\t', '\r', '\n'], " "))?;
+        writeln!(out, "LABELFILE\t{}", choice.label_file.display().to_string().replace(['\t', '\r', '\n'], " "))?;
         writeln!(out, "HINTS\t{}", escape(&choice.hints))?;
         writeln!(out, "ONLYHINTS\t{}", u8::from(choice.only_hints))?;
     }

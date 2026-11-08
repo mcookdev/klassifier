@@ -7,7 +7,8 @@
 //! window positions are):
 //! - `lightroom_window()`: Lightroom's main window, its monitor's work area, and its scale;
 //! - `monitor_of(rect)`: the work area and scale of the monitor `rect` is (mostly) on, or None;
-//! - `dark_menus()` and `activate()`: see the functions below.
+//! - `dark_menus()` and `activate()`: see the functions below;
+//! - `file_browser()`: the program that opens a folder in the system's file browser.
 
 use std::time::Duration;
 
@@ -98,6 +99,14 @@ pub fn place<T: slint::ComponentHandle + 'static>(ui: &T, saved: Option<Geometry
 /// menu is shown. Only Windows needs this (see `win/windows.rs`).
 pub fn dark_menus() {
     platform::dark_menus();
+}
+
+/// Opens `dir` in the system's file browser (Finder, Explorer), without waiting for it.
+pub fn open_folder(dir: &std::path::Path) {
+    let Some(program) = platform::file_browser() else { return };
+    if let Err(e) = std::process::Command::new(program).arg(dir).spawn() {
+        eprintln!("cannot open {} with {program}: {e}", dir.display());
+    }
 }
 
 /// Where `window` is now, to open there next time; None if it is minimized.

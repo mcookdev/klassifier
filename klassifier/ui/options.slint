@@ -9,6 +9,8 @@ component SetPicker inherits Rectangle {
     in property <[string]> sets;
     in-out property <int> index;
     in property <bool> enabled: true;
+    // Just before the menu opens, so the list can be refreshed.
+    callback opening();
     min-height: 32px;
     border-radius: 4px;
     border-width: 1px;
@@ -44,6 +46,7 @@ component SetPicker inherits Rectangle {
     touch := TouchArea {
         enabled: root.enabled;
         clicked => {
+            root.opening();
             menu.show({ x: 0, y: root.height });
         }
     }
@@ -63,6 +66,40 @@ component SetPicker inherits Rectangle {
     }
 }
 
+// Opens the user's label sets folder, to add or change sets.
+component FolderButton inherits Rectangle {
+    callback clicked();
+    width: 32px;
+    min-height: 32px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #4a4a4a;
+    background: touch.pressed ? #444444 : touch.has-hover ? #383838 : #2d2d2d;
+    accessible-role: button;
+    accessible-label: "Open your label sets folder";
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    // A folder outline.
+    Path {
+        width: 16px;
+        height: 13px;
+        viewbox-width: 16;
+        viewbox-height: 13;
+        commands: "M 1 2 L 1 12 L 15 12 L 15 3.5 L 7.5 3.5 L 6 1 L 2 1 Z";
+        stroke: #c8c8c8;
+        stroke-width: 1.2px;
+        fill: transparent;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 export component OptionsWindow inherits Window {
     title: "Classify Photos";
     icon: @image-url("../assets/klassifier.png");
@@ -75,6 +112,9 @@ export component OptionsWindow inherits Window {
 
     in property <[string]> sets;
     in-out property <int> set-index;
+    // The label set menu is opening: list the sets again (files may have been added).
+    callback refresh-sets();
+    callback open-folder();
     in-out property <string> hints <=> hints-edit.text;
     in-out property <bool> only-hints <=> only.checked;
     // Photos to classify, and above how many to warn that it takes a while (0: never).
@@ -82,8 +122,8 @@ export component OptionsWindow inherits Window {
     in property <int> warn-above;
     out property <length> natural-height: layout.preferred-height;
     // Why the entry can't be used, or "" (options_problem in ui_model.rs).
-    pure callback problem-with(string, bool) -> string;
-    out property <string> problem: root.problem-with(root.hints, root.only-hints);
+    pure callback problem-with(string, bool, int) -> string;
+    out property <string> problem: root.problem-with(root.hints, root.only-hints, root.sets.length);
     callback classify();
     callback cancel();
     // The contents changed size, so the window did too (the position may need fixing).
@@ -123,11 +163,23 @@ export component OptionsWindow inherits Window {
                         horizontal-alignment: right;
                         vertical-alignment: center;
                     }
-                    SetPicker {
+                    HorizontalLayout {
                         horizontal-stretch: 1;
-                        sets: root.sets;
-                        index <=> root.set-index;
-                        enabled: !root.only-hints;
+                        spacing: 6px;
+                        SetPicker {
+                            horizontal-stretch: 1;
+                            sets: root.sets;
+                            index <=> root.set-index;
+                            enabled: !root.only-hints;
+                            opening => {
+                                root.refresh-sets();
+                            }
+                        }
+                        FolderButton {
+                            clicked => {
+                                root.open-folder();
+                            }
+                        }
                     }
                 }
                 Row {

@@ -171,3 +171,8 @@ fn main_window(pid: Option<i32>) -> Option<CGRect> {
     }
     best
 }
+
+/// Finder, through `open`.
+pub fn file_browser() -> Option<&'static str> {
+    Some("open")
+}

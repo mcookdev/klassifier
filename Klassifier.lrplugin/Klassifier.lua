@@ -89,8 +89,7 @@ end
 local function labelArguments(context, options)
 	local args = { '--top ' .. TOP_LABELS }
 	if not options.onlyHints then
-		local setFile = LrPathUtils.child(LrPathUtils.child(_PLUGIN.path, Options.LABEL_SET_DIR), options.labelSet .. '.txt')
-		args[#args + 1] = '--labels ' .. Exec.quote(setFile)
+		args[#args + 1] = '--labels ' .. Exec.quote(options.labelFile)
 	end
 	if #options.hints > 0 then
 		local hintsFile = Exec.tempFile('klassifier-hints.txt')
