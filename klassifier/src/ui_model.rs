@@ -7,7 +7,8 @@
 //! #klassifier-ui<TAB>review<TAB>1
 //! WINDOW<TAB><x><TAB><y><TAB><width><TAB><height><TAB><maximized 0|1>   (optional)
 //! NOTES<TAB><text>
-//! ITEM<TAB><n><TAB><name><TAB><copy note><TAB><photo count><TAB><edited 0|1><TAB><stand-in thumbnail><TAB><Lightroom thumbnail>
+//! SAVEFILES<TAB><requests file><TAB><answers file>                     (optional: Save Keywords)
+//! ITEM<TAB><n><TAB><name><TAB><copy note><TAB><photo count><TAB><edited 0|1><TAB><stand-in thumbnail><TAB><Lightroom thumbnail><TAB><saved 0|1>
 //! LABEL<TAB><n><TAB><label><TAB><suggested 0|1><TAB><chosen 0|1><TAB><keyword "Parent > Child", or empty>
 //! ```
 //!
@@ -16,7 +17,21 @@
 //! outer top-left corner and inner size, in physical pixels. In NOTES, `\n` stands for a line
 //! break and `\\` for a backslash. The stand-in
 //! thumbnail is the one `klassifier.exe --thumbs` writes; the Lightroom one, rendered with the
-//! photo's edits, may appear later. Neither file has to exist yet.
+//! photo's edits, may appear later. Neither file has to exist yet. `saved` (optional, 0 if
+//! missing) marks a photo whose keywords were already written by Save Keywords.
+//!
+//! Save Keywords writes one photo's keywords while the window stays open. The window appends a
+//! line to the requests file, and the plugin, which watches it, writes the keywords and
+//! appends its answer to the answers file, which the window watches:
+//!
+//! ```text
+//! SAVE<TAB><n><TAB><k>...      (requests: save item n with these labels, k as in CHOSEN)
+//! SAVED<TAB><n>                (answers: done)
+//! FAILED<TAB><n><TAB><why>     (answers: nothing was written)
+//! ```
+//!
+//! Neither file has to exist yet, and a line only counts once its line break is written.
+//! Without SAVEFILES the window has no Save Keywords.
 //!
 //! Output, on stdout:
 //!
@@ -57,8 +72,9 @@
 //!
 //! Lines starting with `#` are informational. Readers ignore unknown lines and extra fields.
 
-use std::io::{self, Write};
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
@@ -82,6 +98,20 @@ pub struct Item {
     pub standin: PathBuf,
     pub rendered: PathBuf,
     pub labels: Vec<Label>,
+    pub save: Save,
+}
+
+/// Where a photo is with Save Keywords.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Save {
+    #[default]
+    Unsaved,
+    /// Asked for, no answer yet.
+    Saving,
+    /// Its keywords are in the catalog; it can't be changed any more.
+    Saved,
+    /// The last try wrote nothing, for this reason; it can be changed and saved again.
+    Failed(String),
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -89,6 +119,14 @@ pub struct ReviewInput {
     pub notes: String,
     pub items: Vec<Item>,
     pub window: Option<Geometry>,
+    pub save_files: Option<SaveFiles>,
+}
+
+/// The files Save Keywords goes through (see the module docs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveFiles {
+    pub requests: PathBuf,
+    pub answers: PathBuf,
 }
 
 /// Where a window is: its outer top-left corner and inner size, in physical pixels.
@@ -139,6 +177,21 @@ impl Outcome {
 }
 
 impl Item {
+    /// Saving or saved: its labels can't be changed, and Save All leaves it out.
+    pub fn locked(&self) -> bool {
+        matches!(self.save, Save::Saving | Save::Saved)
+    }
+
+    /// Whether Save Keywords can save it now: not locked, and with a keyword to write.
+    pub fn can_save(&self) -> bool {
+        !self.locked() && self.keyword_count() > 0
+    }
+
+    /// Edited, and the edit not saved yet: Cancel would lose it.
+    pub fn unsaved_edit(&self) -> bool {
+        self.edited && !self.locked()
+    }
+
     /// Whether `label` will be written: the user's choice once edited, else the suggestion.
     pub fn keeps(&self, label: &Label) -> bool {
         if self.edited {
@@ -155,7 +208,7 @@ impl Item {
     /// Ticks or unticks label `k`. The first edit starts from the suggestions, so the other
     /// labels keep what they showed. An item stays edited even with every label unticked.
     pub fn toggle(&mut self, k: usize) {
-        if k >= self.labels.len() {
+        if k >= self.labels.len() || self.locked() {
             return;
         }
         if !self.edited {
@@ -167,14 +220,74 @@ impl Item {
         self.labels[k].chosen = !self.labels[k].chosen;
     }
 
-    /// "3 Keywords", "1 Keyword", "0 Keywords", "2 Keywords (edited)".
+    /// "3 Keywords", "1 Keyword", "0 Keywords", "2 Keywords (edited)", "2 Keywords (saved)".
     pub fn status(&self) -> String {
         let text = plural(self.keyword_count(), "Keyword");
-        if self.edited {
-            text + " (edited)"
-        } else {
-            text
+        match self.save {
+            Save::Saving => text + " (saving)",
+            Save::Saved => text + " (saved)",
+            Save::Failed(_) => text + " (not saved)",
+            Save::Unsaved if self.edited => text + " (edited)",
+            Save::Unsaved => text,
         }
+    }
+
+    /// The requests file line that saves this item, item `n` (from 1), with its kept labels.
+    pub fn save_request(&self, n: usize) -> String {
+        let mut line = format!("SAVE\t{n}");
+        for (k, _) in self.labels.iter().enumerate().filter(|(_, l)| self.keeps(l)) {
+            line += &format!("\t{}", k + 1);
+        }
+        line
+    }
+}
+
+/// An answers file line: the item (from 0) and whether it was saved, or None if it isn't one.
+pub fn parse_answer(line: &str) -> Option<(usize, Result<(), String>)> {
+    let fields: Vec<&str> = line.trim_end_matches('\r').split('\t').collect();
+    let n: usize = fields.get(1)?.parse().ok().filter(|&n| n > 0)?;
+    match fields[0] {
+        "SAVED" => Some((n - 1, Ok(()))),
+        "FAILED" => Some((n - 1, Err(fields.get(2).copied().unwrap_or("").to_string()))),
+        _ => None,
+    }
+}
+
+/// Records an answer for item `index`, if it is waiting for one.
+pub fn apply_answer(items: &mut [Item], index: usize, answer: Result<(), String>) {
+    if let Some(item) = items.get_mut(index).filter(|item| item.save == Save::Saving) {
+        item.save = match answer {
+            Ok(()) => Save::Saved,
+            Err(why) => Save::Failed(why),
+        };
+    }
+}
+
+/// Appends `line` to `file`, in one write so the reader never sees half a request.
+pub fn append_line(file: &Path, line: &str) -> io::Result<()> {
+    OpenOptions::new().create(true).append(true).open(file)?.write_all(format!("{line}\n").as_bytes())
+}
+
+/// Reads the lines added to a file since the last call, as they are completed.
+#[derive(Debug, Default)]
+pub struct LineReader {
+    pos: u64,
+}
+
+impl LineReader {
+    /// The new complete lines; none if the file doesn't exist yet.
+    pub fn read_new(&mut self, file: &Path) -> io::Result<Vec<String>> {
+        let mut f = match fs::File::open(file) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        f.seek(SeekFrom::Start(self.pos))?;
+        let mut bytes = Vec::new();
+        f.read_to_end(&mut bytes)?;
+        let Some(end) = bytes.iter().rposition(|&b| b == b'\n') else { return Ok(Vec::new()) };
+        self.pos += end as u64 + 1;
+        Ok(String::from_utf8_lossy(&bytes[..=end]).lines().map(str::to_string).collect())
     }
 }
 
@@ -182,10 +295,11 @@ fn plural(n: usize, word: &str) -> String {
     format!("{n} {word}{}", if n == 1 { "" } else { "s" })
 }
 
-/// Keyword assignments, and photos that would get at least one, over all items.
+/// Keyword assignments, and photos that would get at least one, over the items Save All
+/// would write (all but the saved ones).
 pub fn totals(items: &[Item]) -> (usize, usize) {
     let (mut keywords, mut photos) = (0, 0);
-    for item in items {
+    for item in items.iter().filter(|item| !item.locked()) {
         let n = item.keyword_count();
         if n > 0 {
             keywords += n * item.photo_count;
@@ -195,14 +309,19 @@ pub fn totals(items: &[Item]) -> (usize, usize) {
     (keywords, photos)
 }
 
-/// "12 photos to review. 30 keywords to add on 11 photos."
+/// "12 photos to review. 30 keywords to add on 11 photos.", or with photos saved already,
+/// "12 photos to review, 2 saved. 25 keywords to add on 9 photos."
 pub fn totals_line(items: &[Item]) -> String {
     let (keywords, photos) = totals(items);
-    let reviewed = plural(items.len(), "photo");
-    if keywords == 0 {
-        format!("{reviewed} to review. No keywords to add.")
-    } else {
-        format!("{reviewed} to review. {} to add on {}.", plural(keywords, "keyword"), plural(photos, "photo"))
+    let saved = items.iter().filter(|item| item.locked()).count();
+    let reviewed = match saved {
+        0 => format!("{} to review", plural(items.len(), "photo")),
+        _ => format!("{} to review, {saved} saved", plural(items.len(), "photo")),
+    };
+    match (keywords, saved) {
+        (0, 0) => format!("{reviewed}. No keywords to add."),
+        (0, _) => format!("{reviewed}. No more keywords to add."),
+        _ => format!("{reviewed}. {} to add on {}.", plural(keywords, "keyword"), plural(photos, "photo")),
     }
 }
 
@@ -264,6 +383,13 @@ pub fn parse_review(text: &str) -> Result<ReviewInput> {
         match fields[0] {
             "NOTES" => input.notes = unescape(fields.get(1).copied().unwrap_or("")),
             "WINDOW" => input.window = parse_window(&fields[1..]),
+            "SAVEFILES" => {
+                if fields.len() < 3 || fields[1].is_empty() || fields[2].is_empty() {
+                    bail!("line {n}: SAVEFILES needs two files");
+                }
+                input.save_files =
+                    Some(SaveFiles { requests: PathBuf::from(fields[1]), answers: PathBuf::from(fields[2]) });
+            }
             "ITEM" => {
                 if fields.len() < 8 {
                     bail!("line {n}: ITEM needs 8 fields, has {}", fields.len());
@@ -280,6 +406,10 @@ pub fn parse_review(text: &str) -> Result<ReviewInput> {
                     standin: PathBuf::from(fields[6]),
                     rendered: PathBuf::from(fields[7]),
                     labels: Vec::new(),
+                    save: match fields.get(8) {
+                        Some(saved) if flag(saved, "saved", n)? => Save::Saved,
+                        _ => Save::Unsaved,
+                    },
                 });
             }
             "LABEL" => {

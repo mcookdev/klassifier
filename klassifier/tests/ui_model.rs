@@ -1,11 +1,13 @@
 //! Review window data: the exchange format with the plugin, and the texts the window shows.
 
+use std::fs;
 use std::path::PathBuf;
 
 use klassifier::ui_model::{
-    center_window, escape, grid_rows, move_selection, options_problem, parse_hints, parse_options, parse_report,
-    parse_review, place_window, restore_window, totals, totals_line, unescape, write_options_result, write_result,
-    Geometry, Item, Label, Move, OptionsChoice, Outcome, Rect,
+    append_line, apply_answer, center_window, escape, grid_rows, move_selection, options_problem, parse_answer,
+    parse_hints, parse_options, parse_report, parse_review, place_window, restore_window, totals, totals_line,
+    unescape, write_options_result, write_result, Geometry, Item, Label, LineReader, Move, OptionsChoice, Outcome,
+    Rect, Save, SaveFiles,
 };
 
 fn label(name: &str, suggested: bool) -> Label {
@@ -21,15 +23,17 @@ fn item(labels: Vec<Label>, photo_count: usize) -> Item {
         standin: PathBuf::from("1.jpg"),
         rendered: PathBuf::from("1.lr.jpg"),
         labels,
+        save: Save::Unsaved,
     }
 }
 
 const SAMPLE: &str = "#klassifier-ui\treview\t1\n\
 NOTES\tLabels: General.\\nCancelled after 3 of 9 photos. C:\\\\x\n\
+SAVEFILES\tC:\\t\\save.txt\tC:\\t\\saved.txt\n\
 ITEM\t1\tDSC01.ARW\t+1 virtual copy\t2\t0\tC:\\t\\1.jpg\tC:\\t\\1.lr.jpg\n\
 LABEL\t1\tegret\t1\t0\tWildlife > Bird > Egret\n\
 LABEL\t1\theron\t0\t0\t\n\
-ITEM\t2\tIMG_2.jpg\t\t1\t1\tC:\\t\\2.jpg\tC:\\t\\2.lr.jpg\textra field\n\
+ITEM\t2\tIMG_2.jpg\t\t1\t1\tC:\\t\\2.jpg\tC:\\t\\2.lr.jpg\t1\textra field\n\
 LABEL\t2\tbeach\t1\t0\t\n\
 LABEL\t2\tsand\t0\t1\t\n\
 FUTURE\tignored\n";
@@ -49,9 +53,16 @@ fn parses_review_input() {
     assert_eq!(first.labels.len(), 2);
     assert_eq!(first.labels[0].keyword, "Wildlife > Bird > Egret");
     assert!(first.labels[0].suggested && !first.labels[1].suggested);
+    assert_eq!(first.save, Save::Unsaved, "no saved field");
     let second = &input.items[1];
     assert!(second.edited);
     assert!(second.labels[1].chosen);
+    assert_eq!(second.save, Save::Saved);
+    assert_eq!(
+        input.save_files,
+        Some(SaveFiles { requests: PathBuf::from("C:\\t\\save.txt"), answers: PathBuf::from("C:\\t\\saved.txt") })
+    );
+    assert_eq!(parse_review("#klassifier-ui\treview\t1\n").unwrap().save_files, None);
 }
 
 #[test]
@@ -62,6 +73,8 @@ fn rejects_bad_input() {
     assert!(parse_review(&format!("{header}LABEL\t1\tdog\t1\t0\t\n")).is_err(), "label before its item");
     assert!(parse_review(&format!("{header}ITEM\t1\ta\t\t1\tyes\ts\tr\n")).is_err(), "bad flag");
     assert!(parse_review(&format!("{header}ITEM\t1\ta\n")).is_err(), "too few fields");
+    assert!(parse_review(&format!("{header}ITEM\t1\ta\t\t1\t0\ts\tr\tno\n")).is_err(), "bad saved flag");
+    assert!(parse_review(&format!("{header}SAVEFILES\tonly-one\n")).is_err(), "one save file");
 }
 
 #[test]
@@ -392,4 +405,91 @@ fn grown_dialog_moves_up_into_the_work_area() {
     let work = Rect { x: 0, y: 0, w: 1920, h: 1040 };
     let grown = Rect { x: 600, y: 700, w: 560, h: 400 };
     assert_eq!(restore_window(grown, work, (560, 400)), Rect { x: 600, y: 640, w: 560, h: 400 });
+}
+
+#[test]
+fn saving_locks_the_photo() {
+    let mut it = item(vec![label("dog", true), label("cat", false)], 1);
+    assert!(it.can_save());
+    it.save = Save::Saving;
+    assert!(!it.can_save());
+    assert_eq!(it.status(), "1 Keyword (saving)");
+    it.toggle(1);
+    assert!(!it.edited, "no changes while saving");
+    it.save = Save::Saved;
+    assert_eq!(it.status(), "1 Keyword (saved)");
+    it.toggle(1);
+    assert!(!it.edited && !it.can_save(), "nor once saved");
+}
+
+#[test]
+fn a_failed_save_can_be_changed_and_tried_again() {
+    let mut it = item(vec![label("dog", true), label("cat", false)], 1);
+    it.save = Save::Failed("busy".into());
+    assert_eq!(it.status(), "1 Keyword (not saved)");
+    it.toggle(1);
+    assert!(it.edited && it.unsaved_edit() && it.can_save());
+    // Nothing ticked: nothing to save.
+    it.toggle(0);
+    it.toggle(1);
+    assert!(!it.can_save());
+}
+
+#[test]
+fn save_request_lists_the_kept_labels() {
+    let mut it = item(vec![label("dog", true), label("cat", false), label("sea", true)], 1);
+    assert_eq!(it.save_request(4), "SAVE\t4\t1\t3", "the suggestions, when not edited");
+    it.toggle(1);
+    it.toggle(0);
+    assert_eq!(it.save_request(4), "SAVE\t4\t2\t3");
+}
+
+#[test]
+fn parses_answers() {
+    assert_eq!(parse_answer("SAVED\t3"), Some((2, Ok(()))));
+    assert_eq!(parse_answer("FAILED\t1\tcatalog busy\r"), Some((0, Err("catalog busy".into()))));
+    assert_eq!(parse_answer("FAILED\t1"), Some((0, Err(String::new()))));
+    assert_eq!(parse_answer("SAVED\t0"), None);
+    assert_eq!(parse_answer("SAVED\tx"), None);
+    assert_eq!(parse_answer("FUTURE\t1"), None);
+}
+
+#[test]
+fn answers_only_count_while_saving() {
+    let mut items = vec![item(vec![label("dog", true)], 1), item(vec![label("sea", true)], 1)];
+    items[0].save = Save::Saving;
+    apply_answer(&mut items, 0, Err("busy".into()));
+    assert_eq!(items[0].save, Save::Failed("busy".into()));
+    apply_answer(&mut items, 0, Ok(()));
+    assert_eq!(items[0].save, Save::Failed("busy".into()), "not asked again yet");
+    apply_answer(&mut items, 1, Ok(()));
+    assert_eq!(items[1].save, Save::Unsaved);
+    apply_answer(&mut items, 7, Ok(()));
+}
+
+#[test]
+fn totals_leave_out_saved_photos() {
+    let mut items = vec![item(vec![label("dog", true)], 2), item(vec![label("sea", true)], 1)];
+    items[0].save = Save::Saved;
+    assert_eq!(totals(&items), (1, 1));
+    assert_eq!(totals_line(&items), "2 photos to review, 1 saved. 1 keyword to add on 1 photo.");
+    items[1].save = Save::Saving;
+    assert_eq!(totals_line(&items), "2 photos to review, 2 saved. No more keywords to add.");
+}
+
+#[test]
+fn line_reader_returns_complete_lines_once() {
+    let dir = std::env::temp_dir().join(format!("klassifier-test-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("answers.txt");
+    let _ = fs::remove_file(&file);
+    let mut reader = LineReader::default();
+    assert!(reader.read_new(&file).unwrap().is_empty(), "no file yet");
+    append_line(&file, "SAVED\t1").unwrap();
+    fs::write(&file, [fs::read(&file).unwrap(), b"FAILED\t2\tha".to_vec()].concat()).unwrap();
+    assert_eq!(reader.read_new(&file).unwrap(), ["SAVED\t1"], "the half-written line waits");
+    fs::write(&file, [fs::read(&file).unwrap(), b"lf\r\n".to_vec()].concat()).unwrap();
+    assert_eq!(reader.read_new(&file).unwrap(), ["FAILED\t2\thalf"]);
+    assert!(reader.read_new(&file).unwrap().is_empty());
+    fs::remove_dir_all(&dir).unwrap();
 }

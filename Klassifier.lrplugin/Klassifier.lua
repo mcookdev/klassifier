@@ -2,7 +2,7 @@
   Klassifier.lua
   Asks for a label set and optional hints (Options.lua), runs klassifier.exe on the
   targeted photos in chunks, and opens the review window (Review.lua) with the keywords
-  it suggests for each one. Accept All writes them (Keywords.lua). Thumbnails for
+  it suggests for each one. Save Keywords writes one photo's, Save All the rest (Keywords.lua). Thumbnails for
   the review are made along the way (Thumbs.lua).
 ------------------------------------------------------------------------------]]
 
@@ -309,21 +309,24 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	end
 	-- Reopens the review (choices kept) if the catalog is busy when writing.
 	local catalog = LrApplication.activeCatalog()
+	local function saveItem(item) return Keywords.apply(catalog, { item }, Review.keywordPaths) end
 	Exec.running = 'review'
 	while true do
-		local result = Review.show(context, items, notes)
+		local result = Review.show(context, items, notes, saveItem)
 		if result ~= 'ok' then return end
-		if Review.totals(items) == 0 then
-			LrDialogs.message('Review keywords', 'No keywords to add.', 'info')
+		-- Photos saved with Save Keywords already have their keywords.
+		local unsaved = Review.unsaved(items)
+		if Review.totals(unsaved) == 0 then
+			if #unsaved == #items then LrDialogs.message('Review keywords', 'No keywords to add.', 'info') end
 			return
 		end
-		local assigned, photos = Keywords.apply(catalog, items, Review.keywordPaths)
+		local assigned, photos = Keywords.apply(catalog, unsaved, Review.keywordPaths)
 		if assigned then
 			LrDialogs.message('Review keywords', string.format('Added %d keyword(s) to %d photo(s).', assigned, photos), 'info')
 			return
 		end
 		LrDialogs.message('Review keywords',
-			'Lightroom\'s catalog was busy, so no keywords were added. Your choices are kept: try Accept All again.',
+			'Lightroom\'s catalog was busy, so no keywords were added. Your choices are kept: try Save All again.',
 			'warning')
 	end
 end)

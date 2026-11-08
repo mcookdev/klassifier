@@ -6,7 +6,7 @@ use std::cell::{Cell as StdCell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
-use crate::ui_model::{grid_rows, Item};
+use crate::ui_model::{grid_rows, Item, Save};
 use slint::{ComponentHandle, Image, Model, ModelNotify, ModelRc, ModelTracker, VecModel};
 
 use crate::thumbs::{self, Loaded, Paths, Quality, Slot, ThumbLoader};
@@ -170,6 +170,7 @@ impl GridModel {
             copies: item.copy_note.as_str().into(),
             status: item.status().into(),
             edited: item.edited,
+            saved: item.save == Save::Saved,
             loaded: image.is_some(),
             thumb: image.unwrap_or_default(),
         }
@@ -202,12 +203,27 @@ impl GridModel {
         }
     }
 
-    /// Refreshes the panel's status and ticks for photo `index`.
+    /// Refreshes the panel's status, ticks and Save Keywords for photo `index`.
     pub fn update_panel_labels(&self, ui: &ReviewWindow, index: usize) {
         let items = self.items.borrow();
         let item = &items[index];
         ui.set_panel_status(item.status().into());
         ui.set_panel_edited(item.edited);
+        ui.set_panel_locked(item.locked());
+        ui.set_panel_saved(item.save == Save::Saved);
+        ui.set_panel_can_save(item.can_save());
+        ui.set_panel_save_text(
+            match item.save {
+                Save::Saving => "Saving...",
+                Save::Saved => "Saved",
+                Save::Unsaved | Save::Failed(_) => "Save Keywords",
+            }
+            .into(),
+        );
+        ui.set_panel_problem(match &item.save {
+            Save::Failed(why) => why.as_str().into(),
+            _ => Default::default(),
+        });
         let labels: Vec<PanelLabel> = item
             .labels
             .iter()

@@ -1,6 +1,7 @@
 --[[----------------------------------------------------------------------------
   Keywords.lua
-  Writes the accepted keywords to the catalog, in one write block (one undo step).
+  Writes the accepted keywords to the catalog, in one write block (one undo step) per
+  Save All or Save Keywords.
   Keywords are only added; a photo's other keywords are left alone.
 ------------------------------------------------------------------------------]]
 

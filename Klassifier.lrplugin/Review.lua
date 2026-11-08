@@ -1,9 +1,10 @@
 --[[----------------------------------------------------------------------------
   Review.lua
   The review window: klassifier-ui.exe shows the classified photos in a scrolling grid
-  with their suggested keywords, a side panel to change a photo's keywords, and
-  Accept All / Cancel. This module writes its input, runs it and reads back the
-  result, including the changes (format in klassifier/src/ui_model.rs). It also
+  with their suggested keywords, a side panel to change and save a photo's keywords,
+  and Save All / Cancel. This module writes its input, runs it and reads back the
+  result, including the changes (format in klassifier/src/ui_model.rs). While the
+  window is open it also saves photos as the window asks (Save Keywords). It also
   shows the report for a run where nothing could be classified.
 
   An item is one classified file:
@@ -13,12 +14,14 @@
       suggested = { [label] = true },        -- the classifier's suggestions
       paths = { [label] = { name... } },     -- mapped keywords (label => Parent > Child)
       standin, rendered,                     -- thumbnail files (see Thumbs.lua)
-      chosen = nil | { [label] = true } }    -- the user's choice, once edited
+      chosen = nil | { [label] = true },     -- the user's choice, once edited
+      saved = nil | true }                   -- its keywords were written by Save Keywords
 ------------------------------------------------------------------------------]]
 
 local LrDialogs   = import 'LrDialogs'
 local LrFileUtils = import 'LrFileUtils'
 local LrLogger    = import 'LrLogger'
+local LrTasks     = import 'LrTasks'
 
 local Exec = require 'Exec'
 
@@ -51,6 +54,15 @@ function Review.keywordPaths(item)
 	return paths
 end
 
+-- The items Save All writes: all but those saved with Save Keywords.
+function Review.unsaved(items)
+	local unsaved = {}
+	for _, item in ipairs(items) do
+		if not item.saved then unsaved[#unsaved + 1] = item end
+	end
+	return unsaved
+end
+
 -- Keyword assignments and photos that would get at least one, over all items.
 function Review.totals(items)
 	local keywords, photos = 0, 0
@@ -74,16 +86,18 @@ function Review.copyNote(item)
 	return '+' .. (copies == 1 and '1 virtual copy' or noun)
 end
 
--- The review window's input lines for `items` (ui_model.rs describes them).
-local function inputLines(items, notes)
+-- The review window's input lines for `items` (ui_model.rs describes them). `saveFiles` are
+-- the requests and answers files for Save Keywords.
+local function inputLines(items, notes, saveFiles)
 	local lines = { '#klassifier-ui\treview\t1' }
 	Exec.addSavedWindow(lines, 'reviewWindow')
 	lines[#lines + 1] = 'NOTES\t' .. Exec.escape(notes)
+	lines[#lines + 1] = 'SAVEFILES\t' .. Exec.clean(saveFiles.requests) .. '\t' .. Exec.clean(saveFiles.answers)
 	for n, item in ipairs(items) do
 		local set = item.chosen or item.suggested
 		lines[#lines + 1] = table.concat({
 			'ITEM', n, Exec.clean(item.name), Exec.clean(Review.copyNote(item)), #item.photos,
-			item.chosen and 1 or 0, Exec.clean(item.standin), Exec.clean(item.rendered),
+			item.chosen and 1 or 0, Exec.clean(item.standin), Exec.clean(item.rendered), item.saved and 1 or 0,
 		}, '\t')
 		for _, label in ipairs(item.candidates) do
 			local path = item.paths and item.paths[label]
@@ -117,17 +131,113 @@ local function readResult(output, items)
 	return result
 end
 
+-- True when the label sets `a` and `b` ({ [label] = true }) are the same.
+local function sameSet(a, b)
+	for label in pairs(a) do
+		if not b[label] then return false end
+	end
+	for label in pairs(b) do
+		if not a[label] then return false end
+	end
+	return true
+end
+
+-- Handles one Save Keywords request line (fields split): sets the item's choice, writes it with
+-- `saveItem` and returns the answer line.
+local function handleSave(fields, items, saveItem)
+	local n = tonumber(fields[2])
+	local item = n and items[n]
+	if not item then return nil end
+	if item.saved then return 'SAVED\t' .. n end
+	local chosen = {}
+	for i = 3, #fields do
+		local label = item.candidates[tonumber(fields[i])]
+		if label then chosen[label] = true end
+	end
+	-- Kept as the choice only if it differs from the suggestions, so a review reopened after
+	-- Save All finds the catalog busy shows "(edited)" only on photos that were.
+	if item.chosen or not sameSet(chosen, item.suggested) then item.chosen = chosen end
+	local ok, assigned = LrTasks.pcall(saveItem, item)
+	if not ok then
+		logger:error('Save Keywords failed for ' .. item.name .. ': ' .. tostring(assigned))
+		return 'FAILED\t' .. n .. '\t' .. Exec.clean(assigned)
+	end
+	if not assigned then
+		return 'FAILED\t' .. n .. '\tLightroom\'s catalog was busy. Try again.'
+	end
+	item.saved = true
+	logger:info(string.format('Save Keywords: %d keyword(s) on %s', assigned, item.name))
+	return 'SAVED\t' .. n
+end
+
+-- Watches `files.requests` for Save Keywords requests while the window is open, saving each with
+-- `saveItem(item)` (which returns the keyword count, or nil if the catalog was busy) and
+-- appending the answer to `files.answers`. Returns a function that stops watching, once the
+-- window has closed, after handling any request left.
+local function watchSaves(files, items, saveItem)
+	local stopped, done, handled = false, false, 0
+	local function answer(line)
+		local f = io.open(files.answers, 'ab')
+		if not f then
+			logger:error('Could not write ' .. files.answers)
+			return
+		end
+		f:write(line, '\n')
+		f:close()
+	end
+	local function poll()
+		if not LrFileUtils.exists(files.requests) then return end
+		local text = LrFileUtils.readFile(files.requests) or ''
+		local count = 0
+		-- Only complete lines: the window may be writing the last one.
+		for line in text:gmatch('([^\n]*)\n') do
+			count = count + 1
+			if count > handled then
+				handled = count
+				local fields = Exec.splitTabs((line:gsub('\r$', '')))
+				if fields[1] == 'SAVE' then
+					local reply = handleSave(fields, items, saveItem)
+					if reply then answer(reply) end
+				end
+			end
+		end
+	end
+	LrTasks.startAsyncTask(function()
+		while not stopped do
+			local ok, err = LrTasks.pcall(poll)
+			if not ok then logger:error('Save Keywords: ' .. tostring(err)) end
+			LrTasks.sleep(0.1)
+		end
+		local ok, err = LrTasks.pcall(poll)
+		if not ok then logger:error('Save Keywords: ' .. tostring(err)) end
+		done = true
+	end)
+	return function()
+		stopped = true
+		while not done do LrTasks.sleep(0.05) end
+	end
+end
+
 -- Shows the review window for `items` (at least one). `notes` is extra header text (skipped
--- files, cancel). Returns 'ok' (Accept All) or 'cancel'.
-function Review.show(context, items, notes)
+-- files, cancel). `saveItem(item)` writes one item's keywords for Save Keywords: it returns the
+-- keyword count, or nil if the catalog was busy. Saved items get `saved = true`. Returns 'ok'
+-- (Save All) or 'cancel'.
+function Review.show(context, items, notes, saveItem)
 	local inFile = Exec.tempFile('klassifier-review.txt')
-	context:addCleanupHandler(function() LrFileUtils.delete(inFile) end)
-	local ok, err = Exec.writeLines(inFile, inputLines(items, notes))
+	local saveFiles = { requests = Exec.tempFile('klassifier-save.txt'), answers = Exec.tempFile('klassifier-saved.txt') }
+	context:addCleanupHandler(function()
+		LrFileUtils.delete(inFile)
+		LrFileUtils.delete(saveFiles.requests)
+		LrFileUtils.delete(saveFiles.answers)
+	end)
+	local ok, err = Exec.writeLines(inFile, inputLines(items, notes, saveFiles))
 	if not ok then
 		LrDialogs.message('Review keywords', 'Could not write ' .. inFile .. ': ' .. tostring(err), 'critical')
 		return 'cancel'
 	end
+	local stopSaving = watchSaves(saveFiles, items, saveItem)
 	local output, runErr = Exec.run('klassifier-ui.exe', string.format('--review --in "%s"', inFile))
+	stopSaving()
 	if output then Exec.saveWindow(output, 'reviewWindow') end
 	local result = output and readResult(output, items)
 	if not result then

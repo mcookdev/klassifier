@@ -20,12 +20,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use slint::platform::Key;
 use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use ui_model::{
-    move_selection, Geometry, Item, Label, Move, OptionsChoice, OptionsInput, Outcome, ReportInput, ReviewInput,
+    move_selection, Geometry, Item, Label, LineReader, Move, OptionsChoice, OptionsInput, Outcome, ReportInput,
+    ReviewInput, Save, SaveFiles,
 };
 use win::Fit;
 
@@ -42,6 +44,9 @@ Usage: klassifier-ui --options --in <file>
                         --count repeats them up to <n> photos
   --select <n>          Start with photo <n> (from 1) selected
   --screenshot <png>    Render the window off screen to <png> instead of showing it";
+
+/// How often the answers file is checked while a Save Keywords waits for the plugin.
+const ANSWER_INTERVAL: Duration = Duration::from_millis(150);
 
 /// Screenshot size, in pixels at scale 1.
 const SCREENSHOT_SIZE: (u32, u32) = (1200, 800);
@@ -142,17 +147,22 @@ fn run() -> Result<()> {
         bail!("no photos to review");
     }
     let select = args.select.min(input.items.len() - 1);
+    let saver = match (&args.input, &input.save_files) {
+        (Input::Demo(..), _) => Saver::Instant,
+        (_, Some(files)) => Saver::Files(files.clone()),
+        (_, None) => Saver::None,
+    };
     if let Some(png) = &args.screenshot {
         // Off screen there is no event loop to run `changed` handlers, so pass the column
         // count on each frame.
         return screenshot(
             png,
-            || Ok(build(input, select, false)?.0),
+            || Ok(build(input, select, saver, false)?.0),
             |_| SCREENSHOT_SIZE,
             |ui: &ReviewWindow| ui.invoke_columns_changed(ui.get_columns()),
         );
     }
-    let (closed, items) = review(input, select)?;
+    let (closed, items) = review(input, select, saver)?;
     ui_model::write_result(&mut io::stdout().lock(), closed.outcome, &items, closed.window)?;
     Ok(())
 }
@@ -197,13 +207,25 @@ struct Closed {
     window: Option<Geometry>,
 }
 
+/// How Save Keywords writes a photo's keywords.
+#[derive(Clone)]
+enum Saver {
+    /// No Save Keywords.
+    None,
+    /// Through the plugin (see `ui_model`).
+    Files(SaveFiles),
+    /// At once, for `--demo`: nothing is written.
+    Instant,
+}
+
 /// The review window, its items and how it closed (see build).
 type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>);
 
 /// Builds the window for `input`, with photo `select` in the side panel. `threaded`: load
 /// images on worker threads (false for screenshots, which have no event loop to deliver them).
-fn build(input: ReviewInput, select: usize, threaded: bool) -> Result<Built> {
+fn build(input: ReviewInput, select: usize, saver: Saver, threaded: bool) -> Result<Built> {
     let ui = ReviewWindow::new()?;
+    ui.set_can_save_keywords(!matches!(saver, Saver::None));
     let items = Rc::new(RefCell::new(input.items));
     let model = grid::GridModel::new(items.clone(), &ui, threaded);
     ui.set_rows(ModelRc::from(model.clone() as Rc<dyn Model<Data = GridRow>>));
@@ -222,7 +244,7 @@ fn build(input: ReviewInput, select: usize, threaded: bool) -> Result<Built> {
             }
         }
     };
-    ui.on_accept_all(finish(Outcome::Accept));
+    ui.on_save_all(finish(Outcome::Accept));
     ui.on_cancel(finish(Outcome::Cancel));
 
     let weak = ui.as_weak();
@@ -253,6 +275,30 @@ fn build(input: ReviewInput, select: usize, threaded: bool) -> Result<Built> {
         show_totals(&ui, &its.borrow());
     });
 
+    let (weak, m, its) = (ui.as_weak(), model.clone(), items.clone());
+    ui.on_save_keywords(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let index = ui.get_selected() as usize;
+        {
+            let mut items = its.borrow_mut();
+            let item = &mut items[index];
+            if !item.can_save() {
+                return;
+            }
+            item.save = match &saver {
+                Saver::None => return,
+                Saver::Instant => Save::Saved,
+                Saver::Files(files) => match ui_model::append_line(&files.requests, &item.save_request(index + 1)) {
+                    Ok(()) => Save::Saving,
+                    Err(e) => Save::Failed(format!("cannot write {}: {e}", files.requests.display())),
+                },
+            };
+        }
+        m.item_changed(index);
+        m.update_panel_labels(&ui, index);
+        show_totals(&ui, &its.borrow());
+    });
+
     let (weak, its) = (ui.as_weak(), items.clone());
     ui.on_key(move |text| {
         let Some(ui) = weak.upgrade() else { return false };
@@ -278,7 +324,39 @@ fn build(input: ReviewInput, select: usize, threaded: bool) -> Result<Built> {
 
 fn show_totals(ui: &ReviewWindow, items: &[Item]) {
     ui.set_totals(ui_model::totals_line(items).into());
-    ui.set_edited_count(items.iter().filter(|item| item.edited).count() as i32);
+    ui.set_edited_count(items.iter().filter(|item| item.unsaved_edit()).count() as i32);
+    ui.set_saved_count(items.iter().filter(|item| item.save == Save::Saved).count() as i32);
+}
+
+/// Checks the answers file for the plugin's answers to Save Keywords while any is waiting, and
+/// shows them. The timer runs until it is dropped.
+fn watch_answers(ui: &ReviewWindow, items: Rc<RefCell<Vec<Item>>>, files: SaveFiles) -> slint::Timer {
+    let timer = slint::Timer::default();
+    let mut reader = LineReader::default();
+    let weak = ui.as_weak();
+    timer.start(slint::TimerMode::Repeated, ANSWER_INTERVAL, move || {
+        let Some(ui) = weak.upgrade() else { return };
+        if !items.borrow().iter().any(|item| item.save == Save::Saving) {
+            return;
+        }
+        // Unreadable for now (the plugin writing it): try again next time.
+        let Ok(lines) = reader.read_new(&files.answers) else { return };
+        let answers: Vec<_> = lines.iter().filter_map(|line| ui_model::parse_answer(line)).collect();
+        if answers.is_empty() {
+            return;
+        }
+        let rows = ui.get_rows();
+        let Some(model) = rows.as_any().downcast_ref::<grid::GridModel>() else { return };
+        for (index, answer) in answers {
+            ui_model::apply_answer(&mut items.borrow_mut(), index, answer);
+            if index < items.borrow().len() {
+                model.item_changed(index);
+            }
+        }
+        model.update_panel_labels(&ui, ui.get_selected() as usize);
+        show_totals(&ui, &items.borrow());
+    });
+    timer
 }
 
 /// The grid move for a key, if it is one. `page`: grid lines per Page Up / Page Down.
@@ -316,9 +394,14 @@ fn label_key(text: &str) -> Option<usize> {
 
 /// Shows the window until the user decides. Closing it counts as Cancel, after asking if
 /// anything was changed.
-fn review(input: ReviewInput, select: usize) -> Result<(Closed, Vec<Item>)> {
+fn review(input: ReviewInput, select: usize, saver: Saver) -> Result<(Closed, Vec<Item>)> {
     let saved = input.window;
-    let (ui, items, closed) = build(input, select, true)?;
+    let files = match &saver {
+        Saver::Files(files) => Some(files.clone()),
+        _ => None,
+    };
+    let (ui, items, closed) = build(input, select, saver, true)?;
+    let _answers = files.map(|files| watch_answers(&ui, items.clone(), files));
     let (weak, c) = (ui.as_weak(), closed.clone());
     ui.window().on_close_requested(move || match weak.upgrade() {
         Some(ui) if ui.get_edited_count() > 0 => {
@@ -371,10 +454,11 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
                 standin: file.clone(),
                 rendered: file.with_extension("lr.jpg"),
                 labels,
+                save: Save::Unsaved,
             }
         })
         .collect();
-    Ok(ReviewInput { notes: "Labels: demo. 0 failed, 0 unsupported.".into(), items, window: None })
+    Ok(ReviewInput { notes: "Labels: demo. 0 failed, 0 unsupported.".into(), items, window: None, save_files: None })
 }
 
 /// Asks for the options until the user classifies or cancels (or saves a picture of the

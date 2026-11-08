@@ -1,5 +1,5 @@
 // The review window: a scrolling grid of the classified photos with their keyword counts,
-// a side panel to change the selected photo's keywords, and Accept All / Cancel.
+// a side panel to change and save the selected photo's keywords, and Save All / Cancel.
 // See src/bin/klassifier-ui/.
 import { Button, ListView, AboutSlint } from "std-widgets.slint";
 export { ReportWindow } from "report.slint";
@@ -11,6 +11,7 @@ export struct Cell {
     copies: string,
     status: string,
     edited: bool,
+    saved: bool,
     thumb: image,
     loaded: bool,
 }
@@ -86,7 +87,7 @@ component GridCell inherits Rectangle {
         }
         Text {
             text: cell.status;
-            color: cell.edited ? #e8b85a : #b4b4b4;
+            color: cell.saved ? #7fbf7f : cell.edited ? #e8b85a : #b4b4b4;
             font-size: 11px;
             horizontal-alignment: center;
         }
@@ -103,9 +104,12 @@ component GridCell inherits Rectangle {
 component LabelRow inherits Rectangle {
     in property <int> number;
     in property <PanelLabel> label;
+    // False once the photo is saved: shown, but it can't be changed.
+    in property <bool> enabled: true;
     callback toggled();
     height: 26px;
-    background: touch.has-hover ? #2e2e2e : transparent;
+    opacity: root.enabled ? 1 : 0.6;
+    background: touch.has-hover && root.enabled ? #2e2e2e : transparent;
     border-radius: 2px;
 
     HorizontalLayout {
@@ -159,6 +163,7 @@ component LabelRow inherits Rectangle {
     }
 
     touch := TouchArea {
+        enabled: root.enabled;
         clicked => {
             root.toggled();
         }
@@ -179,14 +184,25 @@ export component ReviewWindow inherits Window {
     in property <[GridRow]> rows;
     in property <string> totals;
     in property <string> notes;
-    // Photos the user changed; Cancel asks before throwing their changes away.
+    // Photos the user changed and didn't save; Cancel asks before throwing their changes away.
     in property <int> edited-count;
+    // Photos saved with Save Keywords: Cancel leaves their keywords.
+    in property <int> saved-count;
+    // Whether there is Save Keywords (the plugin gave the files it goes through).
+    in property <bool> can-save-keywords;
     // The photo in the side panel.
     in-out property <int> selected: 0;
     in property <string> panel-name;
     in property <string> panel-copies;
     in property <string> panel-status;
     in property <bool> panel-edited;
+    // Saving or saved: its labels can't be changed.
+    in property <bool> panel-locked;
+    in property <bool> panel-saved;
+    in property <bool> panel-can-save;
+    in property <string> panel-save-text: "Save Keywords";
+    // Why the last Save Keywords wrote nothing, or empty.
+    in property <string> panel-problem;
     in property <[PanelLabel]> panel-labels;
     in property <image> panel-image;
     in property <bool> panel-loaded;
@@ -196,8 +212,10 @@ export component ReviewWindow inherits Window {
     // Whole grid lines on screen: how far Page Up / Page Down move.
     out property <int> visible-rows: max(1, floor(list.visible-height / Metrics.row-height));
     callback columns-changed(int);
-    callback accept-all();
+    callback save-all();
     callback cancel();
+    // Write the selected photo's keywords now.
+    callback save-keywords();
     // A photo was clicked.
     callback select(int);
     // Tick or untick the selected photo's label (counted from 0).
@@ -270,7 +288,7 @@ export component ReviewWindow inherits Window {
                     wrap: word-wrap;
                 }
                 Text {
-                    text: "No keywords will be added.";
+                    text: root.saved-count == 0 ? "No keywords will be added." : "Photos you saved keep their keywords.";
                     color: #a0a0a0;
                 }
                 HorizontalLayout {
@@ -303,7 +321,11 @@ export component ReviewWindow inherits Window {
                 return accept;
             }
             if (event.modifiers.control && event.text == Key.Return) {
-                root.accept-all();
+                root.save-all();
+                return accept;
+            }
+            if (!event.modifiers.control && !event.modifiers.alt && event.text == Key.Return && root.can-save-keywords) {
+                root.save-keywords();
                 return accept;
             }
             if (!event.modifiers.control && !event.modifiers.alt && root.key(event.text)) {
@@ -350,10 +372,10 @@ export component ReviewWindow inherits Window {
                                 }
                             }
                             Button {
-                                text: "Accept All";
+                                text: "Save All";
                                 primary: true;
                                 clicked => {
-                                    root.accept-all();
+                                    root.save-all();
                                 }
                             }
                         }
@@ -412,7 +434,12 @@ export component ReviewWindow inherits Window {
                         }
                         Text {
                             text: root.panel-status;
-                            color: root.panel-edited ? #e8b85a : #b4b4b4;
+                            color: root.panel-saved ? #7fbf7f : root.panel-edited ? #e8b85a : #b4b4b4;
+                        }
+                        if root.panel-problem != "": Text {
+                            text: "Not saved: " + root.panel-problem;
+                            color: #e07a6a;
+                            wrap: word-wrap;
                         }
                         Rectangle {
                             height: 1px;
@@ -427,14 +454,28 @@ export component ReviewWindow inherits Window {
                             for label[k] in root.panel-labels: LabelRow {
                                 number: k < 10 ? k + 1 : 0;
                                 label: label;
+                                enabled: !root.panel-locked;
                                 toggled => {
                                     root.toggle(k);
                                     keys.focus();
                                 }
                             }
                         }
+                        if root.can-save-keywords: HorizontalLayout {
+                            alignment: end;
+                            Button {
+                                text: root.panel-save-text;
+                                enabled: root.panel-can-save;
+                                clicked => {
+                                    root.save-keywords();
+                                    keys.focus();
+                                }
+                            }
+                        }
                         Text {
-                            text: "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; Ctrl+Enter is Accept All.";
+                            text: root.can-save-keywords
+                                ? "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; Enter saves this photo's keywords now, Ctrl+Enter is Save All."
+                                : "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; Ctrl+Enter is Save All.";
                             color: #7a7a7a;
                             font-size: 10px;
                             wrap: word-wrap;
