@@ -9,7 +9,7 @@ return {
 
 	LrToolkitIdentifier = 'io.github.mcookdev.klassifier',
 	LrPluginName = "Klassifier",
-	LrPluginInfoUrl = "https://www.example.com",
+	LrPluginInfoUrl = "https://github.com/mcookdev/klassifier",
 
 	-- Adds "Classify Photos" under File > Plug-in Extras
 	LrExportMenuItems = {
@@ -27,5 +27,5 @@ return {
 		},
 	},
 
-	VERSION = { major = 3, minor = 1, revision = 0, build = 62 },
+	VERSION = { major = 3, minor = 1, revision = 1, build = 63 },
 }
