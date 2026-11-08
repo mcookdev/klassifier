@@ -386,3 +386,10 @@ fn dialog_centred_at_its_size() {
         Rect { x: 2000, y: 0, w: 560, h: 300 }
     );
 }
+
+#[test]
+fn grown_dialog_moves_up_into_the_work_area() {
+    let work = Rect { x: 0, y: 0, w: 1920, h: 1040 };
+    let grown = Rect { x: 600, y: 700, w: 560, h: 400 };
+    assert_eq!(restore_window(grown, work, (560, 400)), Rect { x: 600, y: 640, w: 560, h: 400 });
+}

@@ -419,6 +419,16 @@ fn show_options(input: OptionsInput, screenshot_png: Option<&Path>) -> Result<()
             }
             CloseRequestResponse::HideWindow
         });
+        let weak = ui.as_weak();
+        ui.on_natural_size_changed(move || {
+            let weak = weak.clone();
+            // Next turn of the event loop, so the new size is applied first.
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(ui) = weak.upgrade() {
+                    win::keep_on_screen(ui.window(), (OPTIONS_WIDTH, ui.get_natural_height()));
+                }
+            });
+        });
         Ok(ui)
     };
     let natural = |ui: &OptionsWindow| (OPTIONS_WIDTH, ui.get_natural_height());

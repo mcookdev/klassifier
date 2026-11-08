@@ -85,6 +85,11 @@ export component OptionsWindow inherits Window {
     out property <string> problem: root.problem-with(root.hints, root.only-hints);
     callback classify();
     callback cancel();
+    // The contents changed size, so the window did too (the position may need fixing).
+    callback natural-size-changed();
+    changed natural-height => {
+        root.natural-size-changed();
+    }
 
     function try-classify() {
         if (root.problem == "") {

@@ -17,6 +17,28 @@ pub enum Fit {
     Fixed(f32, f32),
 }
 
+/// Moves `window` back into its monitor's work area after it grew. `place` clamps with the
+/// height measured before the window is shown, which is too short, so a dialog that later
+/// grows (text wraps, a warning appears) could end up with its bottom, and its buttons, off
+/// screen. `size` is in logical pixels.
+pub fn keep_on_screen(window: &slint::Window, size: (f32, f32)) {
+    #[cfg(windows)]
+    {
+        use crate::ui_model::restore_window;
+        let scale = window.scale_factor();
+        let (w, h) = ((size.0 * scale) as i32, (size.1 * scale) as i32);
+        let pos = window.position();
+        let rect = Rect { x: pos.x, y: pos.y, w, h };
+        let Some((work, _)) = imp::monitor_of(rect) else { return };
+        let moved = restore_window(rect, work, (w, h));
+        if (moved.x, moved.y) != (pos.x, pos.y) {
+            window.set_position(slint::PhysicalPosition::new(moved.x, moved.y));
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (window, size);
+}
+
 /// Sizes and places `ui`'s window before it is shown: at `saved` (where it was last closed)
 /// if that is on a monitor, else over Lightroom.
 pub fn place<T: slint::ComponentHandle + 'static>(ui: &T, saved: Option<Geometry>, fit: Fit) {
