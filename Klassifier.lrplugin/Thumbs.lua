@@ -1,7 +1,7 @@
 --[[----------------------------------------------------------------------------
   Thumbs.lua
   Thumbnails for the review window, in a temp folder:
-    <n>.jpg     stand-in, written by klassifier.exe --thumbs while classifying, from
+    <n>.jpg     stand-in, written by klassifier --thumbs while classifying, from
                 the image it reads (the camera's rendering of a RAW file)
     <n>.lr.jpg  Lightroom's rendering with the photo's edits, requested here in the
                 background. Fast when Lightroom has previews; for photos without, about

@@ -339,7 +339,7 @@ export component ReviewWindow inherits Window {
                     color: #a0a0a0;
                 }
                 Text {
-                    text: "Uses the SigLIP model by Google (Apache 2.0), ONNX Runtime and DirectML by Microsoft, and rawler (LGPL 2.1). See THIRD_PARTY_NOTICES.md in the plug-in folder.";
+                    text: "Uses the SigLIP model by Google (Apache 2.0), ONNX Runtime by Microsoft (with DirectML on Windows), and rawler (LGPL 2.1). See THIRD_PARTY_NOTICES.md in the plug-in folder.";
                     color: #a0a0a0;
                     wrap: word-wrap;
                 }
@@ -580,9 +580,11 @@ export component ReviewWindow inherits Window {
                             }
                         }
                         Text {
+                            // Slint reads Cmd as `control` on macOS (see the key handler above).
+                            property <string> save-all-key: Platform.os == OperatingSystemType.macos ? "Cmd+Enter" : "Ctrl+Enter";
                             text: root.can-save-keywords
-                                ? "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; Enter saves this photo's keywords now, Ctrl+Enter is Save All."
-                                : "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; Ctrl+Enter is Save All.";
+                                ? "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; Enter saves this photo's keywords now, \{self.save-all-key} is Save All."
+                                : "Click a label, or press its number, to tick or untick it. Bold labels were suggested. Arrow keys move between photos; \{self.save-all-key} is Save All.";
                             color: #7a7a7a;
                             font-size: 10px;
                             wrap: word-wrap;

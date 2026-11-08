@@ -1,41 +1,65 @@
 # Klassifier
 
-A Lightroom Classic plug-in that adds a "Classify Photos" command under
-**File > Plug-in Extras** and **Library > Plug-in Extras**. It runs a small
-Windows console app (`klassifier.exe`, written in Rust) on the targeted photos.
-The app scores each photo against a list of labels ("dog", "beach",
-"sunset", ...) with the [SigLIP](https://huggingface.co/google/siglip-base-patch16-224)
-image model, and the plugin shows the suggested keywords for each photo in a
-review window. The plugin's windows (the options dialog, the review and its
-report) are `klassifier-ui.exe`, also Rust, built with
-[Slint](https://slint.dev). When you accept the keywords, the plugin adds them
-to the photos in the catalog.
+A Lightroom Classic plug-in for Windows and macOS (Apple Silicon) that adds a
+"Classify Photos" command under **File > Plug-in Extras** and **Library >
+Plug-in Extras**. It runs a small console app (`klassifier`, written in Rust;
+`klassifier.exe` on Windows) on the targeted photos. The app scores each photo
+against a list of labels ("dog", "beach", "sunset", ...) with the
+[SigLIP](https://huggingface.co/google/siglip-base-patch16-224) image model, and
+the plugin shows the suggested keywords for each photo in a review window. The
+plugin's windows (the options dialog, the review and its report) are
+`klassifier-ui`, also Rust, built with [Slint](https://slint.dev); on macOS
+it's in `Klassifier.app`, so it shows as Klassifier in the Dock. When you
+accept the keywords, the plugin adds them to the photos in the catalog.
 
-The model runs on the GPU through DirectML (any DirectX 12 GPU) and falls back
-to the CPU. This small model is only slightly slower on the CPU. On a PC with
-more than one GPU (say a desktop CPU's integrated graphics and a graphics
-card), it uses the one Windows ranks as high-performance, normally the
-graphics card. `Klassifier.log` names it (`backend=DirectML gpu=NVIDIA GeForce
-RTX 4090`), and so does the report shown when no photo could be classified.
+The model runs on the GPU and falls back to the CPU:
+
+- **Windows:** DirectML (any DirectX 12 GPU). This small model is only
+  slightly slower on the CPU. On a PC with more than one GPU (say a desktop
+  CPU's integrated graphics and a graphics card), it uses the one Windows
+  ranks as high-performance, normally the graphics card.
+- **macOS:** WebGPU, which ONNX Runtime runs on Metal: about twice as fast as
+  the CPU on an M3 (60 ms against 125 ms per photo). CoreML isn't used: it
+  can run almost none of this model.
+
+`Klassifier.log` names what it ran on (`backend=DirectML gpu=NVIDIA GeForce
+RTX 4090`, `backend=WebGPU gpu=Apple M3`), and so does the report shown when
+no photo could be classified.
 
 For RAW files the model sees the camera's embedded JPEG preview, not your
 Lightroom edits (see [How RAW files are read](#how-raw-files-are-read)).
 
 ## Requirements
 
-- Adobe Lightroom Classic (SDK 6.0 or later) on Windows
-- WSL with Rust (`cargo`), `make`, `curl`, `python3` and `rsync` for building
-  (the last three are usually preinstalled on Ubuntu)
+- Adobe Lightroom Classic (SDK 6.0 or later) on Windows, or on macOS 12 or
+  later on an Apple Silicon (M-series) Mac
+- For building, on the platform's own machine (each builds for itself):
+  - Windows: WSL with Rust (`cargo`), `make`, `curl`, `python3` and `rsync`
+    (the last three are usually preinstalled on Ubuntu)
+  - macOS: Rust (`cargo`) and the Xcode command line tools
+    (`xcode-select --install`: `make`, `cc`, `python3`), which come with
+    `curl` and `rsync`
 - Only to change the app icon: `pip install resvg-py pillow` (see
   [The app icon](#the-app-icon))
 
 ## Building
 
-One-time setup (in WSL):
+`make` builds for the machine it runs on: macOS on a Mac, Windows in WSL. The
+shared steps are in `Makefile`, and what differs per platform (the Rust target,
+the ONNX Runtime files, what's deployed and where) in `mk/windows.mk` and
+`mk/macos.mk`.
+
+One-time setup in WSL:
 
 ```bash
 rustup target add x86_64-pc-windows-gnu
-sudo apt update && sudo apt install -y gcc-mingw-w64-x86-64
+sudo apt update && sudo apt install -y gcc-mingw-w64-x86-64 lua5.1
+```
+
+One-time setup on a Mac:
+
+```bash
+rustup target add aarch64-apple-darwin
 ```
 
 Download the runtime files, about 830 MB, into `vendor/` (gitignored):
@@ -44,8 +68,10 @@ Download the runtime files, about 830 MB, into `vendor/` (gitignored):
 make fetch
 ```
 
-This gets ONNX Runtime 1.24.4 and DirectML 1.15.4 from NuGet, and the SigLIP
-model (`Xenova/siglip-base-patch16-224`, ONNX export) from Hugging Face.
+This gets the SigLIP model (`Xenova/siglip-base-patch16-224`, ONNX export) from
+Hugging Face into `vendor/models/`, and ONNX Runtime 1.24.4 into
+`vendor/windows/` (with DirectML 1.15.4, from NuGet) or `vendor/macos/` (from
+its GitHub release). Each download is checked against a pinned SHA-256.
 `make deploy` runs it too, and it skips files that are already downloaded.
 
 Each deploy needs a new version, so bump it first:
@@ -58,7 +84,8 @@ make bump PART=major   # breaking changes: 2.9.3 -> 3.0.0
 
 This sets the version in `Info.lua` and `Cargo.toml` and adds 1 to `build`. `make deploy`
 stops unless the two files agree and both the version and `build` are newer than the
-deployed ones (see [CLAUDE.md](CLAUDE.md)).
+version deployed to that folder (see [CLAUDE.md](CLAUDE.md)). Each platform's
+deploy folder keeps its own record, so one version can be deployed to both.
 
 Build and deploy:
 
@@ -66,12 +93,19 @@ Build and deploy:
 make deploy
 ```
 
-Or press **Ctrl+Shift+B** in VS Code. This checks the Lua syntax, runs clippy on the
-Windows build with warnings as errors (`make clippy-windows`, so a lint stops the
-deploy), cross-compiles `klassifier.exe` and `klassifier-ui.exe`, and copies the
-plugin folder, the exes and the runtime files to the deploy folder. That's
-`C:\Users\cadre\lr-plugins\Klassifier.lrplugin` by default, the path used in the
-rest of this README. Only changed files are copied, so the model is copied once.
+Or press **Ctrl+Shift+B** (**Cmd+Shift+B** on a Mac) in VS Code. This checks
+the Lua syntax, runs clippy on the deployed build with warnings as errors
+(`make clippy`, so a lint stops the deploy), builds the two apps, and copies
+the plugin folder, the apps and the runtime files to the deploy folder. Only
+changed files are copied, so the model is copied once. The deploy folder is:
+
+- Windows: `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`
+  (`/mnt/c/Users/cadre/lr-plugins` in WSL).
+- macOS: `~/Library/Application Support/Adobe/Lightroom/Modules/Klassifier.lrplugin`,
+  which Lightroom loads by itself. On macOS `make deploy` also builds
+  `Klassifier.app` around `klassifier-ui` (`Info.plist` from
+  `klassifier/assets/macos/`, the icon, an ad-hoc signature).
+
 To deploy somewhere else:
 
 ```bash
@@ -84,12 +118,14 @@ To try the review window without Lightroom:
 make ui-demo
 ```
 
-This opens it on Windows with the photos in `test-data/` (repeated up to 500,
+This opens it (on Windows, from WSL) with the photos in `test-data/` (repeated up to 500,
 `DEMO_COUNT=...` to change) and made-up labels. Its buttons just close it.
 `make ui-demo DEMO_ARGS="--screenshot shot.png"` saves a picture of the window
 instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
 
 ## Installation
+
+On Windows:
 
 1. Run `make deploy`.
 2. Open Lightroom Classic and go to **File > Plug-in Manager**.
@@ -98,6 +134,14 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
    or the model.
 4. Confirm the plugin shows up as "Klassifier" with status
    "Installed and running". Click **Done**.
+
+On macOS:
+
+1. Run `make deploy`.
+2. Restart Lightroom Classic. It loads plug-ins from the Modules folder at
+   startup, so there's nothing to add.
+3. In **File > Plug-in Manager**, confirm "Klassifier" shows as "Installed and
+   running".
 
 ## Usage
 
@@ -115,10 +159,11 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
   again.
 - Videos are skipped. Virtual copies that share a file with another targeted
   photo are processed only once, and share its suggestions.
-- Photos go to `klassifier.exe` 100 at a time, with a progress bar. Cancel
-  takes effect between batches. A console window may flash for each batch.
-  Each batch spends about half a second loading the model, then roughly
-  30 ms per ARW and 60-120 ms per CR2 or JPEG.
+- Photos go to `klassifier` 100 at a time, with a progress bar. Cancel
+  takes effect between batches. On Windows a console window may flash for
+  each batch. Each batch spends about half a second loading the model, then
+  roughly 30 ms per ARW and 60-120 ms per CR2 or JPEG on Windows (about
+  60 ms per JPEG on an M3 Mac).
 - The **Review keywords** window opens where you last left it (maximized if it
   was), or centred over Lightroom the first time, or if that monitor is gone.
   It's moved back onto the screen if part of it would be off. It shows all
@@ -146,7 +191,7 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
   and can't be changed any more. Each save is its own step in **Edit > Undo**.
   If Lightroom's catalog is busy, nothing is added, the panel says why, and you
   can try again. Photos with nothing ticked can't be saved.
-- **Save All** (or Ctrl+Enter) adds the keywords of every photo not saved
+- **Save All** (or Ctrl+Enter; Cmd+Enter on macOS) adds the keywords of every photo not saved
   yet: the ticked ones for photos you changed, the suggested ones for the rest. Photos with nothing
   ticked or suggested get nothing. Keywords are only added,
   never removed, and a keyword that already exists is reused, whatever its
@@ -170,7 +215,7 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
 - If no photo could be classified, a report opens instead of the review
   window: how many failed or were unsupported or skipped, what it ran on, the
   label set, and each photo's error. The errors can be selected and copied
-  (Ctrl+C). OK, Enter or Esc closes it. It also opens where you last left it.
+  (Ctrl+C, or Cmd+C on macOS). OK, Enter or Esc closes it. It also opens where you last left it.
 - The **ⓘ** button (About) shows the version, copyright and credits, and the Slint attribution its license asks for.
 - While Classify Photos is running or its review is open, starting it again
   says so instead of opening a second one.
@@ -253,7 +298,7 @@ Each label becomes the prompt "a photo of <label>". Concrete nouns and short
 phrases ("dog", "makeup artist", "birthday party") work better than abstract
 ideas, and hints have to be labels like these, not a description of the
 shoot. A new combination of labels takes a second or two the first time while
-the text model computes them. They're then cached in `%TEMP%`, and repeating
+the text model computes them. They're then cached in the temp folder (`%TEMP%`, or `$TMPDIR` on macOS), and repeating
 the same set and hints costs nothing extra.
 
 ### Nested keywords
@@ -294,7 +339,7 @@ upright using their EXIF orientation.
 ### Running the app directly
 
 ```bash
-klassifier.exe [options] [paths...]
+klassifier [options] [paths...]
 ```
 
 - `--list <file>` reads photo paths from a UTF-8 file, one per line.
@@ -325,25 +370,29 @@ ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
 #summary	ok=1	err=1	ms=40
 ```
 
-The review window is `klassifier-ui.exe --review --in <file>`; the file it
+The review window is `klassifier-ui --review --in <file>`; the file it
 reads and what it prints are described in `klassifier/src/ui_model.rs`.
-`klassifier-ui.exe --demo <folder>` is what `make ui-demo` runs.
+`klassifier-ui --demo <folder>` is what `make ui-demo` runs.
 
 ## Updating the plugin
 
 Run `make deploy`, then in **File > Plug-in Manager** select the plugin and
-click **Reload Plug-in**.
+click **Reload Plug-in** (or restart Lightroom).
 
 ## Logs
 
 The plugin writes to `Klassifier.log` in Lightroom's logs folder, including
-the exact command line used to run `klassifier.exe`. Open it from the
+the exact command line used to run `klassifier`. Open it from the
 Plug-in Manager's log file link.
 
 ## Uninstalling
 
-Open **File > Plug-in Manager**, select "Klassifier", and click
+On Windows, open **File > Plug-in Manager**, select "Klassifier", and click
 **Remove**. You can then delete `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`.
+
+On macOS, quit Lightroom and delete
+`~/Library/Application Support/Adobe/Lightroom/Modules/Klassifier.lrplugin`
+(the Plug-in Manager can only disable plug-ins in that folder).
 
 ## Testing
 
@@ -351,23 +400,29 @@ Open **File > Plug-in Manager**, select "Klassifier", and click
 make test
 ```
 
-This first checks the plugin's Lua syntax with `luac5.1` (`make lint`, also run by
-`make deploy`). Lightroom runs Lua 5.1, so use that version: newer ones accept
-syntax Lightroom rejects. Install it with `sudo apt install lua5.1`. Without it,
-the check is skipped with a note. It catches syntax errors only, not misspelled
+This first checks the plugin's Lua syntax with Lua 5.1's `luac` (`make lint`, also
+run by `make deploy`). Lightroom runs Lua 5.1, so use that version: newer ones accept
+syntax Lightroom rejects. In WSL, install it with `sudo apt install lua5.1`;
+without it, the check is skipped with a note. On a Mac, where Homebrew no longer
+has Lua 5.1, `make lint` builds `luac` 5.1.5 from lua.org's source into
+`vendor/.cache` the first time. It catches syntax errors only, not misspelled
 names or wrong SDK calls.
 
 Next it checks the Rust formatting (`cargo fmt --check`; run `cargo fmt` in
 `klassifier/` to fix it) and runs clippy with warnings as errors. Either one
-failing fails `make test`. This clippy pass is the Linux build, which leaves out
-the review window and the Windows-only code. `make clippy-windows` (run by
-`make deploy`) checks those.
+failing fails `make test`. Then it runs the app's tests natively. They cover
+reading previews and the review window's data (what it reads from and returns
+to the plugin, and the texts it shows), not the classifier, which needs ONNX
+Runtime and the model, nor the window itself.
 
-Then it runs the app's tests natively on Linux. They cover reading previews and
-the review window's data (what it reads from and returns to the plugin, and the
-texts it shows), not the classifier, because ONNX Runtime is only deployed for
-Windows, nor the window itself, which is built without its UI so no extra Linux
-libraries are needed. The tests that use real photos
+- In WSL, the tests and this clippy pass are the Linux build, without the
+  review window (so no extra Linux libraries are needed) and without the
+  Windows-only code. `make clippy` (run by `make deploy`) checks those.
+- On a Mac, they are the macOS build, the review window and the macOS-only
+  code included.
+
+Each platform's own code is only checked on that platform, so check a change to
+shared code with `make test` on both. The tests that use real photos
 read `test-data/manifest.tsv` at the repo root and are skipped if it's
 missing. `test-data/` is gitignored because it holds personal photos. Each
 manifest line is tab-separated:
@@ -381,15 +436,15 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
 
 ## The app icon
 
-The exes' icon (Explorer, the taskbar) and the windows' icon come from
-`klassifier/assets/klassifier.svg`. After editing it, run
-`python3 tools/make-icons.py` (needs `pip install resvg-py pillow`) to remake
-`klassifier.ico` and `klassifier.png` next to it, and commit all three. The
-build embeds the `.ico`, so building doesn't need Python.
+The exes' icon (Explorer, the taskbar), the macOS app's icon (the Dock) and
+the windows' icon come from `klassifier/assets/klassifier.svg`. After editing
+it, run `python3 tools/make-icons.py` (needs `pip install resvg-py pillow`) to
+remake `klassifier.ico`, `klassifier.icns` and `klassifier.png` next to it, and
+commit all four. The build uses those files, so building doesn't need Python.
 
 ## License
 
 Klassifier is under the MIT license (see [LICENSE](LICENSE)). The SigLIP model,
-ONNX Runtime, DirectML, the rawler library and Slint are under their own licenses; see
+ONNX Runtime, DirectML (Windows), the rawler library and Slint are under their own licenses; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). `make deploy` copies these
 files into the plugin folder.

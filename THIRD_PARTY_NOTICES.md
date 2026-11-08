@@ -18,7 +18,7 @@ license. Full license texts are in the `licenses/` folder.
 
 ## rawler
 
-- Compiled into `klassifier.exe` (reads RAW files)
+- Compiled into `klassifier` (`klassifier.exe` on Windows; reads RAW files)
 - Source: <https://github.com/dnglab/dnglab>, version 0.8.0, by Daniel
   Vogelbacher, Pedro Côrte-Real and contributors
 - License: GNU Lesser General Public License 2.1 (`licenses/LGPL-2.1.txt`)
@@ -28,13 +28,18 @@ license. Full license texts are in the `licenses/` folder.
 
 ## ONNX Runtime
 
-- Files: `onnxruntime.dll`, `onnxruntime_providers_shared.dll`
-- Source: `Microsoft.ML.OnnxRuntime.DirectML` 1.24.4 from NuGet
-  <https://github.com/microsoft/onnxruntime>
+- Files: `onnxruntime.dll`, `onnxruntime_providers_shared.dll` (Windows);
+  `libonnxruntime.dylib` (macOS)
+- Source: <https://github.com/microsoft/onnxruntime>. Windows:
+  `Microsoft.ML.OnnxRuntime.DirectML` 1.24.4 from NuGet. macOS:
+  `onnxruntime-osx-arm64-1.24.4.tgz` from its GitHub release, which also
+  contains WebGPU support (Dawn, under BSD-3-Clause, among others). The
+  licenses of what it contains are in `onnxruntime-ThirdPartyNotices.txt`,
+  deployed next to it
 - License: MIT, Copyright (c) Microsoft Corporation
   (`licenses/onnxruntime-MIT.txt`)
 
-## DirectML
+## DirectML (Windows only)
 
 - File: `DirectML.dll`
 - Source: `Microsoft.AI.DirectML` 1.15.4 from NuGet
@@ -44,7 +49,8 @@ license. Full license texts are in the `licenses/` folder.
 
 ## Slint
 
-- Compiled into `klassifier-ui.exe` (the review window)
+- Compiled into `klassifier-ui` (`klassifier-ui.exe` on Windows,
+  `Klassifier.app` on macOS; the plugin's windows)
 - Source: <https://github.com/slint-ui/slint>, version 1.18.1, by SixtyFPS GmbH
 - License: Slint Royalty-free Desktop, Mobile, and Web Applications License
   2.0 (`licenses/Slint-Royalty-free-2.0.md`). Slint is also available under
@@ -53,7 +59,7 @@ license. Full license texts are in the `licenses/` folder.
 
 ## Rust crates
 
-`klassifier.exe` and `klassifier-ui.exe` also include Rust crates from crates.io. Almost all of them
+`klassifier` and `klassifier-ui` also include Rust crates from crates.io. Almost all of them
 are under MIT and/or Apache-2.0, and some use other permissive licenses (BSD,
 Zlib, ISC, Unicode-3.0). Run `cargo tree` in `klassifier/` to list them; each
 crate's license is in its `Cargo.toml` on crates.io.

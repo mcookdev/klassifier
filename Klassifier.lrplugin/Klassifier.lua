@@ -1,6 +1,6 @@
 --[[----------------------------------------------------------------------------
   Klassifier.lua
-  Asks for a label set and optional hints (Options.lua), runs klassifier.exe on the
+  Asks for a label set and optional hints (Options.lua), runs klassifier on the
   targeted photos in chunks, and opens the review window (Review.lua) with the keywords
   it suggests for each one. Save Keywords writes one photo's, Save All the rest (Keywords.lua). Thumbnails for
   the review are made along the way (Thumbs.lua).
@@ -23,19 +23,19 @@ local Thumbs   = require 'Thumbs'
 local logger = LrLogger('Klassifier')
 logger:enable('logfile') -- writes to Klassifier.log in the Lightroom logs folder
 
--- Photos per klassifier.exe run. Cancel is checked between runs.
+-- Photos per klassifier run. Cancel is checked between runs.
 local CHUNK_SIZE = 100
 -- Labels reported per photo: the candidates offered for review.
 local TOP_LABELS = 10
 
 -- Runs the app on one chunk of paths. `labelArgs` are the --labels options, `thumbArgs` the
 -- --thumbs ones. Returns a table of path -> row fields plus what it ran on ("DirectML (<GPU
--- name>)" or "CPU"), or nil plus an error.
+-- name>)", "WebGPU (<chip>)" or "CPU"), or nil plus an error.
 local function processChunk(paths, labelArgs, thumbArgs)
 	local listFile = Exec.tempFile('klassifier-list.txt')
 	assert(Exec.writeLines(listFile, paths))
 
-	local output, err = Exec.run('klassifier.exe', string.format('%s %s --list "%s"', labelArgs, thumbArgs, listFile))
+	local output, err = Exec.run('klassifier', string.format('%s %s --list %s', labelArgs, thumbArgs, Exec.quote(listFile)))
 	LrFileUtils.delete(listFile)
 	if not output then return nil, err end
 	logger:info(output)
@@ -90,13 +90,13 @@ local function labelArguments(context, options)
 	local args = { '--top ' .. TOP_LABELS }
 	if not options.onlyHints then
 		local setFile = LrPathUtils.child(LrPathUtils.child(_PLUGIN.path, Options.LABEL_SET_DIR), options.labelSet .. '.txt')
-		args[#args + 1] = string.format('--labels "%s"', setFile)
+		args[#args + 1] = '--labels ' .. Exec.quote(setFile)
 	end
 	if #options.hints > 0 then
 		local hintsFile = Exec.tempFile('klassifier-hints.txt')
 		assert(Exec.writeLines(hintsFile, options.hints))
 		context:addCleanupHandler(function() LrFileUtils.delete(hintsFile) end)
-		args[#args + 1] = string.format('--labels "%s"', hintsFile)
+		args[#args + 1] = '--labels ' .. Exec.quote(hintsFile)
 	end
 	return table.concat(args, ' ')
 end
@@ -139,7 +139,7 @@ local function collectTargets(catalog)
 	return entries, videos
 end
 
--- Runs klassifier.exe on `paths` in chunks, with a progress bar, saving each photo's stand-in
+-- Runs klassifier on `paths` in chunks, with a progress bar, saving each photo's stand-in
 -- thumbnail into `thumbs` (see Thumbs.lua). Returns a list of { path, fields } in `paths`
 -- order, the backend name and whether the user cancelled. Returns nil if a run fails (after
 -- showing why).
@@ -156,13 +156,13 @@ local function classifyAll(context, paths, labelArgs, thumbs)
 
 		local chunk = {}
 		for i = first, last do chunk[#chunk + 1] = paths[i] end
-		local thumbArgs = string.format('--thumbs "%s" --thumb-start %d', thumbs.dir, first)
+		local thumbArgs = string.format('--thumbs %s --thumb-start %d', Exec.quote(thumbs.dir), first)
 		local rows, chunkBackend = processChunk(chunk, labelArgs, thumbArgs)
 		if not rows then
 			local err = chunkBackend
 			progress:done()
 			logger:error(err)
-			LrDialogs.message('Classification report', 'Failed to run klassifier.exe:\n' .. err, 'critical')
+			LrDialogs.message('Classification report', 'Failed to run klassifier:\n' .. err, 'critical')
 			return nil
 		end
 		backend = chunkBackend or backend

@@ -1,6 +1,6 @@
 --[[----------------------------------------------------------------------------
   Review.lua
-  The review window: klassifier-ui.exe shows the classified photos in a scrolling grid
+  The review window: klassifier-ui shows the classified photos in a scrolling grid
   with their suggested keywords, a side panel to change and save a photo's keywords,
   and Save All / Cancel. This module writes its input, runs it and reads back the
   result, including the changes (format in klassifier/src/ui_model.rs). While the
@@ -279,13 +279,13 @@ function Review.show(context, items, notes, saveItem)
 	end
 	local stopAlive = keepAlive(aliveFile)
 	local stopSaving = watchSaves(saveFiles, items, saveItem)
-	local output, runErr = Exec.run('klassifier-ui.exe', string.format('--review --in "%s"', inFile))
+	local output, runErr = Exec.run('klassifier-ui', '--review --in ' .. Exec.quote(inFile))
 	stopSaving()
 	stopAlive()
 	if output then Exec.saveWindow(output, 'reviewWindow') end
 	local result = output and readResult(output, items)
 	if not result then
-		local why = runErr or ('No result from klassifier-ui.exe:\n' .. (output or ''):sub(-1000))
+		local why = runErr or ('No result from klassifier-ui:\n' .. (output or ''):sub(-1000))
 		logger:error(why)
 		LrDialogs.message('Review keywords', 'The review window failed:\n' .. why, 'critical')
 		return 'cancel'
@@ -305,7 +305,7 @@ function Review.showReport(context, summary, lines)
 	local ok, err = Exec.writeLines(inFile, input)
 	local output, runErr
 	if ok then
-		output, runErr = Exec.run('klassifier-ui.exe', string.format('--report --in "%s"', inFile))
+		output, runErr = Exec.run('klassifier-ui', '--report --in ' .. Exec.quote(inFile))
 	end
 	if output then Exec.saveWindow(output, 'reportWindow') end
 	if not output then

@@ -32,7 +32,13 @@ case $part in
 esac
 build=$((build + 1))
 
-sed -i "s/VERSION *= *{[^}]*}/VERSION = { major = $major, minor = $minor, revision = $revision, build = $build }/" "$info"
+# Portable edits (GNU and BSD/macOS): write to a temp file, then move it into place.
+rewrite() {
+	file=$1
+	shift
+	"$@" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+rewrite "$info" sed "s/VERSION *= *{[^}]*}/VERSION = { major = $major, minor = $minor, revision = $revision, build = $build }/"
 # Only the first `version =` line: the package's (dependencies' versions are inline tables).
-sed -i "0,/^version *= *\"[^\"]*\"/s//version = \"$major.$minor.$revision\"/" "$cargo"
+rewrite "$cargo" awk -v v="$major.$minor.$revision" '!done && /^version *= *"/ { print "version = \"" v "\""; done = 1; next } { print }'
 echo "Version $major.$minor.$revision build $build"

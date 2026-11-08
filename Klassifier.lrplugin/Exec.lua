@@ -1,7 +1,7 @@
 --[[----------------------------------------------------------------------------
   Exec.lua
-  Runs the plugin's exes (klassifier.exe, klassifier-ui.exe) and helps read and
-  write the tab-separated lines they exchange with the plugin.
+  Runs the plugin's apps (klassifier, klassifier-ui) and helps read and write the
+  tab-separated lines they exchange with the plugin.
 ------------------------------------------------------------------------------]]
 
 local LrFileUtils = import 'LrFileUtils'
@@ -23,24 +23,52 @@ function Exec.tempFile(name)
 	return LrFileUtils.chooseUniqueFileName(LrPathUtils.child(LrPathUtils.getStandardFilePath('temp'), name))
 end
 
--- Runs `exeName` from the plugin folder with `args` (already quoted). Returns its output
--- (stdout and stderr), or nil plus an error message.
-function Exec.run(exeName, args)
-	local exe = LrPathUtils.child(_PLUGIN.path, exeName)
+-- Each app's file in the plugin folder, by platform. On macOS klassifier-ui is in an app
+-- bundle, so it has its name and icon in the Dock; running its binary directly still uses them.
+local APPS = WIN_ENV and {
+	['klassifier'] = 'klassifier.exe',
+	['klassifier-ui'] = 'klassifier-ui.exe',
+} or {
+	['klassifier'] = 'klassifier',
+	['klassifier-ui'] = 'Klassifier.app/Contents/MacOS/klassifier-ui',
+}
+
+-- `path` quoted as one shell argument. Windows paths can't contain '"'. On macOS the shell
+-- expands $, ` and \ inside double quotes, so single quotes, with each ' written as '\''.
+function Exec.quote(path)
+	if WIN_ENV then return '"' .. path .. '"' end
+	return "'" .. path:gsub("'", "'\\''") .. "'"
+end
+
+-- What `LrTasks.execute`'s `status` means, or nil if the app succeeded. On macOS it's the
+-- raw wait status: the exit code times 256, or the signal that stopped the app.
+local function failure(status)
+	if status == 0 then return nil end
+	if WIN_ENV then return 'exited with code ' .. tostring(status) end
+	local signal = status % 256
+	if signal ~= 0 then return 'was stopped by signal ' .. (signal % 128) end
+	return 'exited with code ' .. math.floor(status / 256)
+end
+
+-- Runs `app` ('klassifier' or 'klassifier-ui') from the plugin folder with `args` (paths
+-- quoted with Exec.quote). Returns its output (stdout and stderr), or nil plus an error message.
+function Exec.run(app, args)
+	local exe = LrPathUtils.child(_PLUGIN.path, assert(APPS[app], app))
 	local outFile = Exec.tempFile('klassifier-output.txt')
 
-	local cmd = string.format('"%s" %s > "%s" 2>&1', exe, args, outFile)
+	local cmd = string.format('%s %s > %s 2>&1', Exec.quote(exe), args, Exec.quote(outFile))
 	-- cmd /c needs the whole command wrapped in quotes when it contains quoted paths.
 	if WIN_ENV then cmd = '"' .. cmd .. '"' end
 
 	logger:info('Running: ' .. cmd)
-	local exitCode = LrTasks.execute(cmd)
+	local status = LrTasks.execute(cmd)
 	local output = LrFileUtils.readFile(outFile)
 	LrFileUtils.delete(outFile)
-	if exitCode ~= 0 then
-		-- The exe prints "error: ..." explaining why; show the end of its output.
+	local failed = failure(status)
+	if failed then
+		-- The app prints "error: ..." explaining why; show the end of its output.
 		local detail = output and output:gsub('%s+$', ''):sub(-1000) or ''
-		return nil, exeName .. ' exited with code ' .. tostring(exitCode) .. '\n' .. detail
+		return nil, app .. ' ' .. failed .. '\n' .. detail
 	end
 	if not output then
 		return nil, 'Could not read output file ' .. outFile
@@ -76,7 +104,7 @@ function Exec.unescape(s)
 end
 
 -- Where each window was last closed is kept in the plugin's preferences, under a key per
--- window, as klassifier-ui.exe's WINDOW line fields: "x<TAB>y<TAB>width<TAB>height<TAB>maximized".
+-- window, as klassifier-ui's WINDOW line fields: "x<TAB>y<TAB>width<TAB>height<TAB>maximized".
 local WINDOW_FIELDS = '^%-?%d+\t%-?%d+\t%d+\t%d+\t[01]$'
 
 -- Adds the WINDOW line for the window saved under `key` to `lines`, if there is one.

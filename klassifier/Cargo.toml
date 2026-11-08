@@ -1,14 +1,15 @@
 [package]
 name = "klassifier"
-version = "2.13.0"
+version = "2.14.0"
 edition = "2021"
 license = "MIT"
 
 [features]
-# The review window (klassifier-ui.exe). Off for `make test`, so the tests build on Linux
-# without the system libraries Slint needs there.
+# The plugin's windows (klassifier-ui). Off for `make test` in WSL, so the tests build on
+# Linux without the system libraries Slint needs there. The macOS-only dependencies below are
+# for klassifier-ui too.
 default = ["ui"]
-ui = ["dep:slint", "dep:slint-build"]
+ui = ["dep:slint", "dep:slint-build", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-core-foundation", "dep:objc2-core-graphics"]
 
 [[bin]]
 name = "klassifier-ui"
@@ -18,10 +19,11 @@ required-features = ["ui"]
 anyhow = "1.0.104"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff", "webp"] }
 ndarray = "0.17.2"
-# load-dynamic: onnxruntime.dll is loaded at runtime from next to the exe (Microsoft's
-# prebuilt DLLs are MSVC, so they can't be linked into this MinGW build). api-24 matches
-# ONNX Runtime 1.24, the last release with a DirectML package (see ORT_VERSION in Makefile).
-ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "load-dynamic", "directml", "api-24"] }
+# load-dynamic: ONNX Runtime is loaded at runtime from next to the exe (Microsoft's prebuilt
+# DLLs are MSVC, so they can't be linked into the MinGW build; the macOS dylib is loaded the
+# same way). api-24 matches ONNX Runtime 1.24, the last release with a DirectML package (see
+# ORT_VERSION in Makefile). The GPU provider's feature is added per platform below.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-24"] }
 rawler = "0.8.0"
 # FemtoVG (OpenGL), falling back to the software renderer if OpenGL isn't available.
 slint = { version = "1.18.1", optional = true, default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software"] }
@@ -40,6 +42,7 @@ lto = "thin"
 # DXGI: to name the GPU DirectML runs on, for the report. The rest: to find Lightroom's
 # window, so the review window opens centred over it.
 [target."cfg(windows)".dependencies]
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["directml"] }
 windows = { version = "0.62.2", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
@@ -49,6 +52,16 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# WebGPU (on Metal), sysctl (the chip's name, for the report), and for the windows: finding Lightroom's
+# window and the displays' work areas, and bringing the window to the front.
+[target."cfg(target_os = \"macos\")".dependencies]
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["webgpu"] }
+libc = "0.2"
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication", "NSScreen"] }
+objc2-core-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "CFArray", "CFCGTypes", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-graphics = { version = "0.3", optional = true, default-features = false, features = ["std", "CGGeometry", "CGWindow"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

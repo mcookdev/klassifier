@@ -1,8 +1,7 @@
 //! Zero-shot image classifier using SigLIP (google/siglip-base-patch16-224, ONNX export by
 //! Xenova). Each label gets an independent score from 0 to 1, so several labels can match one
-//! image. Runs on the GPU through DirectML when available, otherwise on the CPU. With more
-//! than one GPU (a desktop CPU's integrated graphics and a graphics card, say), DirectML is
-//! asked for the one Windows ranks as high-performance.
+//! image. Runs on the GPU when available (DirectML on Windows, WebGPU on macOS; see `accel`),
+//! otherwise on the CPU.
 //!
 //! Label embeddings come from the text model, which is only needed when the labels change:
 //! they are cached in a file keyed by the labels and the model files' sizes and times.
@@ -16,10 +15,11 @@ use image::imageops::FilterType;
 use image::DynamicImage;
 use ndarray::{Array2, Array4, ArrayView1, Ix2};
 use ort::environment::Environment;
-use ort::ep;
 use ort::session::Session;
 use ort::value::TensorRef;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
+
+use crate::accel;
 
 /// Model input size (preprocessor_config.json).
 pub const IMAGE_SIZE: u32 = 224;
@@ -45,11 +45,6 @@ pub const SUGGEST_MAX: usize = 5;
 /// Bump when anything that affects cached label embeddings changes (prompt, tokenizing, ...).
 const CACHE_VERSION: u32 = 1;
 
-#[cfg(windows)]
-const ORT_LIBRARY: &str = "onnxruntime.dll";
-#[cfg(not(windows))]
-const ORT_LIBRARY: &str = "libonnxruntime.so";
-
 /// The model files, as laid out by `make fetch`.
 pub struct ModelFiles {
     pub vision: PathBuf,
@@ -69,14 +64,15 @@ impl ModelFiles {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
-    DirectML,
+    /// The platform's GPU provider (`accel::NAME`).
+    Gpu,
     Cpu,
 }
 
 impl Backend {
     pub fn as_str(self) -> &'static str {
         match self {
-            Backend::DirectML => "DirectML",
+            Backend::Gpu => accel::NAME.unwrap_or("GPU"),
             Backend::Cpu => "CPU",
         }
     }
@@ -84,12 +80,8 @@ impl Backend {
 
 /// Loads ONNX Runtime from `dir`. Call once; the `Classifier` is created in the environment returned.
 pub fn init_runtime(dir: &Path) -> Result<Environment> {
-    let directml = dir.join("DirectML.dll");
-    if directml.is_file() {
-        // Load ours before ONNX Runtime asks for it, so an older copy in System32 isn't used.
-        ort::util::preload_dylib(&directml).map_err(|e| anyhow!("cannot load {}: {e}", directml.display()))?;
-    }
-    let library = dir.join(ORT_LIBRARY);
+    accel::preload(dir)?;
+    let library = dir.join(accel::LIBRARY);
     ensure!(library.is_file(), "{} not found (run `make fetch` and `make deploy`)", library.display());
     ort::init_from(&library).map_err(|e| anyhow!("cannot load {}: {e}", library.display()))?.build().map_err(ort_error)
 }
@@ -170,7 +162,7 @@ impl Classifier {
                 (embeddings, false)
             }
         };
-        let gpu_name = if backend == Backend::DirectML { high_performance_gpu_name() } else { None };
+        let gpu_name = if backend == Backend::Gpu { accel::device_name() } else { None };
         Ok(Classifier { vision, backend, gpu_name, labels, label_embeddings, labels_from_cache })
     }
 
@@ -178,7 +170,7 @@ impl Classifier {
         self.backend
     }
 
-    /// The GPU's name when running on DirectML, if Windows reports one.
+    /// What the GPU provider runs on (the graphics card, the Apple chip), if the system says.
     pub fn gpu_name(&self) -> Option<&str> {
         self.gpu_name.as_deref()
     }
@@ -368,10 +360,10 @@ fn embed_labels(env: &Environment, files: &ModelFiles, labels: &[String], use_gp
 
 fn open_session(env: &Environment, model: &Path, use_gpu: bool) -> Result<(Session, Backend)> {
     ensure!(model.is_file(), "model file {} not found (run `make fetch` and `make deploy`)", model.display());
-    if use_gpu {
+    if let (true, Some(name)) = (use_gpu, accel::NAME) {
         match build_session(env, model, true) {
-            Ok(session) => return Ok((session, Backend::DirectML)),
-            Err(e) => eprintln!("warning: DirectML unavailable, using the CPU: {e:#}"),
+            Ok(session) => return Ok((session, Backend::Gpu)),
+            Err(e) => eprintln!("warning: {name} unavailable, using the CPU: {e:#}"),
         }
     }
     let session = build_session(env, model, false).with_context(|| format!("cannot load {}", model.display()))?;
@@ -381,43 +373,9 @@ fn open_session(env: &Environment, model: &Path, use_gpu: bool) -> Result<(Sessi
 fn build_session(env: &Environment, model: &Path, gpu: bool) -> Result<Session> {
     let mut builder = Session::builder(env).map_err(ort_error)?;
     if gpu {
-        // DirectML doesn't support memory patterns or parallel execution.
-        builder = builder
-            .with_memory_pattern(false)
-            .map_err(ort_error)?
-            .with_parallel_execution(false)
-            .map_err(ort_error)?
-            .with_execution_providers([ep::DirectML::default()
-                .with_performance_preference(ep::directml::PerformancePreference::HighPerformance)
-                .build()
-                .error_on_failure()])
-            .map_err(ort_error)?;
+        builder = accel::configure(builder, model)?;
     }
     builder.commit_from_file(model).map_err(ort_error)
-}
-
-/// The name of the GPU Windows ranks first for high performance: the one DirectML picks with
-/// `PerformancePreference::HighPerformance` (it sorts adapters the same way).
-#[cfg(windows)]
-fn high_performance_gpu_name() -> Option<String> {
-    use windows::Win32::Graphics::Dxgi::{
-        CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory6, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-    };
-    // SAFETY: plain DXGI calls; the COM wrappers release the objects when dropped.
-    let desc = unsafe {
-        let factory: IDXGIFactory6 = CreateDXGIFactory1().ok()?;
-        let adapter: IDXGIAdapter1 =
-            factory.EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE).ok()?;
-        adapter.GetDesc1().ok()?
-    };
-    let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
-    let name = String::from_utf16_lossy(&desc.Description[..len]).trim().to_string();
-    (!name.is_empty()).then_some(name)
-}
-
-#[cfg(not(windows))]
-fn high_performance_gpu_name() -> Option<String> {
-    None
 }
 
 /// Fails with a clear message if the model doesn't have the expected input/output names.

@@ -1,7 +1,7 @@
 //! Tab-separated output read by the Lightroom plugin.
 //!
 //! ```text
-//! #klassifier<TAB><version>[<TAB>backend=<DirectML|CPU>[<TAB>gpu=<name>]]
+//! #klassifier<TAB><version>[<TAB>backend=<DirectML|WebGPU|CPU>[<TAB>gpu=<name>]]
 //! #model<TAB>load_ms=<n><TAB>labels=<n><TAB>label_cache=<hit|miss>
 //! OK<TAB><path><TAB><source><TAB><width><TAB><height><TAB><rotation><TAB><ms><TAB><flags>[<TAB><labels><TAB><shares><TAB><match><TAB><suggested><TAB><keywords>]
 //! ERR<TAB><path><TAB><message>
@@ -9,7 +9,7 @@
 //! ```
 //!
 //! The last five OK fields, the backend and `#model` are only present when classifying (not
-//! with `--no-classify`). `gpu` is the graphics card's name on DirectML, if Windows gives one.
+//! with `--no-classify`). `gpu` is what the GPU provider runs on (the graphics card, or the Apple chip), if known.
 //! - `<labels>`: `label=score;label=score;...`, best first, 0.0000-1.0000. SigLIP's own score
 //!   for each label on its own; usually low (a clear match is often 0.05-0.3). Use this for
 //!   cutoffs: it means the same thing in every photo.

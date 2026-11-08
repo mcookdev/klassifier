@@ -1,7 +1,7 @@
 --[[----------------------------------------------------------------------------
   Options.lua
   The Classify Photos options: which label set, extra hints, and whether to use
-  only the hints. klassifier-ui.exe --options asks for them (format in
+  only the hints. klassifier-ui --options asks for them (format in
   klassifier/src/ui_model.rs); the choices are remembered in the plugin's
   preferences.
 ------------------------------------------------------------------------------]]
@@ -52,7 +52,7 @@ function Options.parseHints(text)
 	return hints
 end
 
--- Shows the options dialog (klassifier-ui.exe --options; format in ui_model.rs). Returns
+-- Shows the options dialog (klassifier-ui --options; format in ui_model.rs). Returns
 -- { labelSet, hints, onlyHints }, or nil if cancelled. The choices are remembered for next time.
 function Options.ask(context, photoCount)
 	local prefs = LrPrefs.prefsForPlugin()
@@ -76,7 +76,7 @@ function Options.ask(context, photoCount)
 	local ok, err = Exec.writeLines(inFile, input)
 	local output, runErr
 	if ok then
-		output, runErr = Exec.run('klassifier-ui.exe', string.format('--options --in "%s"', inFile))
+		output, runErr = Exec.run('klassifier-ui', '--options --in ' .. Exec.quote(inFile))
 	end
 	if not output then
 		local why = runErr or ('Could not write ' .. inFile .. ': ' .. tostring(err))
@@ -96,7 +96,7 @@ function Options.ask(context, photoCount)
 		end
 	end
 	if not result then
-		local why = 'No result from klassifier-ui.exe:\n' .. output:sub(-1000)
+		local why = 'No result from klassifier-ui:\n' .. output:sub(-1000)
 		logger:error(why)
 		LrDialogs.message('Classify Photos', 'The options window failed:\n' .. why, 'critical')
 		return nil
