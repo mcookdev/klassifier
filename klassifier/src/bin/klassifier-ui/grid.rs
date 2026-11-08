@@ -23,7 +23,7 @@ pub struct GridModel {
     panel_edge: StdCell<u32>,
     thumb_size: f32,
     panel_size: f32,
-    cache: RefCell<HashMap<usize, (Image, Quality)>>,
+    cache: RefCell<HashMap<usize, (Option<Image>, Quality)>>,
     order: RefCell<VecDeque<usize>>,
     pending: RefCell<HashSet<usize>>,
     /// The panel's picture: (photo, image, quality). One photo at a time.
@@ -101,21 +101,21 @@ impl GridModel {
 
     fn cell_loaded(&self, index: usize, loaded: Loaded) {
         self.pending.borrow_mut().remove(&index);
-        if let Some(buffer) = loaded.buffer {
-            self.cache.borrow_mut().insert(index, (Image::from_rgba8(buffer), loaded.quality));
-            let mut order = self.order.borrow_mut();
-            order.retain(|&i| i != index);
-            order.push_back(index);
-            while order.len() > CACHE_CAP {
-                if let Some(old) = order.pop_front() {
-                    self.cache.borrow_mut().remove(&old);
-                    if let Some(loader) = &self.loader {
-                        loader.unwatch(Slot::Cell(old));
-                    }
+        // Failures are cached too, so a missing or undecodable file is not reloaded on every redraw.
+        self.cache.borrow_mut().insert(index, (loaded.buffer.map(Image::from_rgba8), loaded.quality));
+        let mut order = self.order.borrow_mut();
+        order.retain(|&i| i != index);
+        order.push_back(index);
+        while order.len() > CACHE_CAP {
+            if let Some(old) = order.pop_front() {
+                self.cache.borrow_mut().remove(&old);
+                if let Some(loader) = &self.loader {
+                    loader.unwatch(Slot::Cell(old));
                 }
             }
         }
-        self.watch_if_better(Slot::Cell(index), loaded.quality, self.edge.get());
+        drop(order);
+        self.watch_if_better(Slot::Cell(index), loaded.quality, loaded.tried, self.edge.get());
         self.notify.row_changed(index / self.columns.get());
     }
 
@@ -129,14 +129,15 @@ impl GridModel {
             ui.set_panel_loaded(true);
             *self.panel.borrow_mut() = Some((index, image, loaded.quality));
         }
-        self.watch_if_better(Slot::Panel(index), loaded.quality, self.panel_edge.get());
+        self.watch_if_better(Slot::Panel(index), loaded.quality, loaded.tried, self.panel_edge.get());
     }
 
-    /// Reloads `slot` when Lightroom's thumbnail appears, if it has less now.
-    fn watch_if_better(&self, slot: Slot, have: Quality, edge: u32) {
+    /// Reloads `slot` when Lightroom's thumbnail appears, if it has less now. `tried` is the
+    /// best file that existed at the last load, so one that failed to decode is not retried.
+    fn watch_if_better(&self, slot: Slot, have: Quality, tried: Quality, edge: u32) {
         if let Some(loader) = &self.loader {
             if have < Quality::Rendered {
-                loader.watch(slot, self.paths(slot.index()), have, edge);
+                loader.watch(slot, self.paths(slot.index()), have, tried, edge);
             } else {
                 loader.unwatch(slot);
             }
@@ -153,16 +154,14 @@ impl GridModel {
             None => {
                 let loaded = thumbs::load_now(Slot::Cell(index), self.paths(index), self.edge.get());
                 self.pending.borrow_mut().remove(&index);
-                if let Some(buffer) = loaded.buffer {
-                    self.cache.borrow_mut().insert(index, (Image::from_rgba8(buffer), loaded.quality));
-                }
+                self.cache.borrow_mut().insert(index, (loaded.buffer.map(Image::from_rgba8), loaded.quality));
             }
         }
     }
 
     fn cell(&self, index: usize) -> Cell {
         self.ensure_thumb(index);
-        let image = self.cache.borrow().get(&index).map(|(image, _)| image.clone());
+        let image = self.cache.borrow().get(&index).and_then(|(image, _)| image.clone());
         let items = self.items.borrow();
         let item = &items[index];
         Cell {
@@ -193,7 +192,7 @@ impl GridModel {
             loader.unwatch(Slot::Panel(old));
         }
         *self.panel.borrow_mut() = None;
-        let interim = self.cache.borrow().get(&index).map(|(image, _)| image.clone());
+        let interim = self.cache.borrow().get(&index).and_then(|(image, _)| image.clone());
         ui.set_panel_loaded(interim.is_some());
         ui.set_panel_image(interim.unwrap_or_default());
         let (slot, paths, edge) = (Slot::Panel(index), self.paths(index), self.panel_edge.get());

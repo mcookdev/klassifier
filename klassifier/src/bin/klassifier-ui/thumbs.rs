@@ -61,6 +61,10 @@ impl Slot {
 pub struct Loaded {
     pub slot: Slot,
     pub quality: Quality,
+    /// The best quality whose file existed when loading, whether or not it decoded. Files are
+    /// written atomically, so one that fails to decode never will: only a better file than
+    /// this is worth reloading for.
+    pub tried: Quality,
     /// None when no file could be loaded.
     pub buffer: Option<SharedPixelBuffer<Rgba8Pixel>>,
 }
@@ -76,7 +80,8 @@ struct Shared {
     /// Served newest first, so the rows on screen load before ones scrolled past.
     jobs: Mutex<Vec<Job>>,
     ready: Condvar,
-    /// Images shown with less than Lightroom's thumbnail: slot -> (what they have, job to rerun).
+    /// Images shown with less than Lightroom's thumbnail: slot -> (best quality already tried,
+    /// job to rerun).
     watched: Mutex<HashMap<Slot, (Quality, Job)>>,
 }
 
@@ -132,9 +137,11 @@ impl ThumbLoader {
         self.shared.ready.notify_one();
     }
 
-    /// Reloads `slot` once a better file than `have` appears.
-    pub fn watch(&self, slot: Slot, paths: Paths, have: Quality, edge: u32) {
-        self.shared.watched.lock().unwrap().insert(slot, (have, Job { slot, paths, edge }));
+    /// Reloads `slot` once a better file than both `have` (what it shows) and `tried` (what
+    /// existed at the last load, even if it did not decode) appears. Missing entries stay
+    /// watched, so a file that appears later still loads.
+    pub fn watch(&self, slot: Slot, paths: Paths, have: Quality, tried: Quality, edge: u32) {
+        self.shared.watched.lock().unwrap().insert(slot, (have.max(tried), Job { slot, paths, edge }));
     }
 
     pub fn unwatch(&self, slot: Slot) {
@@ -143,14 +150,15 @@ impl ThumbLoader {
 }
 
 fn load(job: &Job) -> Loaded {
+    let tried = job.paths.best();
     for (quality, path) in [(Quality::Rendered, &job.paths.rendered), (Quality::Standin, &job.paths.standin)] {
         if is_file(path) {
             if let Ok(buffer) = decode(path, job.edge) {
-                return Loaded { slot: job.slot, quality, buffer: Some(buffer) };
+                return Loaded { slot: job.slot, quality, tried, buffer: Some(buffer) };
             }
         }
     }
-    Loaded { slot: job.slot, quality: Quality::Missing, buffer: None }
+    Loaded { slot: job.slot, quality: Quality::Missing, tried, buffer: None }
 }
 
 fn decode(path: &Path, edge: u32) -> Result<SharedPixelBuffer<Rgba8Pixel>> {
