@@ -96,14 +96,20 @@ make deploy
 
 Or press **Ctrl+Shift+B** (**Cmd+Shift+B** on a Mac) in VS Code. This checks
 the Lua syntax, runs clippy on the deployed build with warnings as errors
-(`make clippy`, so a lint stops the deploy), builds the two apps, and copies
-the plugin folder, the apps and the runtime files to the deploy folder. Only
-changed files are copied, so the model is copied once. The deploy folder is:
+(`make clippy`, so a lint stops the deploy), builds the two apps, assembles the
+finished plugin in `dist/Klassifier.lrplugin` (gitignored; `make dist` does just
+this step), and copies it to the deploy folder. Only changed files are copied,
+so the model is copied once, and `dist/` links to the model in `vendor/` rather
+than copying it. Lightroom runs the deployed copy, so it only changes on a
+deploy. The deploy folder is:
 
-- Windows: `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`
-  (`/mnt/c/Users/cadre/lr-plugins` in WSL).
+- Windows: `C:\Users\<you>\lr-plugins\Klassifier.lrplugin`, in your Windows
+  user folder, which `make` gets from `cmd.exe`. It's on the Windows drive
+  because Lightroom can't run the plugin well from WSL's files.
 - macOS: `~/Library/Application Support/Adobe/Lightroom/Modules/Klassifier.lrplugin`,
   which Lightroom loads by itself.
+
+`make reveal` opens the deploy folder in Finder or Explorer.
 
 On macOS the build (`make build`, run by `make deploy`) also wraps
 `klassifier-ui` in `Klassifier.app`, with `Info.plist` from
@@ -133,9 +139,9 @@ On Windows:
 
 1. Run `make deploy`.
 2. Open Lightroom Classic and go to **File > Plug-in Manager**.
-3. Click **Add** and select `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`.
-   Don't add the repo's `Klassifier.lrplugin` folder; it doesn't contain the exe
-   or the model.
+3. Click **Add** and select `C:\Users\<you>\lr-plugins\Klassifier.lrplugin`
+   (`make reveal` opens it). Don't add the repo's `Klassifier.lrplugin` folder;
+   it doesn't contain the exe or the model.
 4. Confirm the plugin shows up as "Klassifier" with status
    "Installed and running". Click **Done**.
 
@@ -397,7 +403,7 @@ the exact command line used to run `klassifier`. On macOS that's
 ## Uninstalling
 
 On Windows, open **File > Plug-in Manager**, select "Klassifier", and click
-**Remove**. You can then delete `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`.
+**Remove**. You can then delete `C:\Users\<you>\lr-plugins\Klassifier.lrplugin`.
 
 On macOS, quit Lightroom and delete
 `~/Library/Application Support/Adobe/Lightroom/Modules/Klassifier.lrplugin`

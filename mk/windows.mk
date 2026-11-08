@@ -1,9 +1,15 @@
 # Windows: cross-compiled in WSL with MinGW, running on DirectML. Included by the Makefile.
 TARGET       := x86_64-pc-windows-gnu
 LINUX        := x86_64-unknown-linux-gnu
-DEPLOY_DIR   ?= /mnt/c/Users/cadre/lr-plugins
-DEPLOY_FILES  = $(RELEASE)/klassifier.exe $(RELEASE)/klassifier-ui.exe
+DIST_FILES    = $(RELEASE)/klassifier.exe $(RELEASE)/klassifier-ui.exe
 LUAC         ?= luac5.1
+
+# Deployed on the Windows drive, which Lightroom reads at full speed whether WSL is running or
+# not: C:\Users\<you>\lr-plugins. The Windows user folder comes from cmd.exe, looked up the
+# first time DEPLOY_DIR is used and only then (`make test` doesn't need it, and CI has no
+# cmd.exe). $$$$ is one shell $ after make's two expansions.
+WIN_HOME      = $(eval WIN_HOME := $$(shell wslpath "$$$$(cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r')" 2>/dev/null))$(or $(WIN_HOME),$(error cannot find the Windows user folder with cmd.exe; set DEPLOY_DIR))
+DEPLOY_DIR   ?= $(WIN_HOME)/lr-plugins
 LUAC_HINT    := sudo apt install lua5.1
 
 # The tests run natively on Linux, without the `ui` feature: Slint needs system libraries to
@@ -35,6 +41,10 @@ $(RUNTIME_DIR)/onnxruntime_providers_shared.dll: $(ORT_PKG)
 
 $(RUNTIME_DIR)/DirectML.dll: $(DML_PKG)
 	$(call extract,$<,bin/x64-win/DirectML.dll)
+
+# Shows the deployed plugin in Explorer, which exits with 1 even when it worked.
+reveal:
+	explorer.exe "$$(wslpath -w "$(DEPLOY_DIR)/$(PLUGIN)")" || true
 
 # Opens the review window on Windows. The stand-in thumbnails are made by a Linux build of
 # the app (it can't run the .exe).

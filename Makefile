@@ -1,12 +1,15 @@
 # Builds and deploys the plugin for the host's platform: macOS (Apple Silicon) on a Mac,
-# Windows (cross-compiled) in WSL. What differs per platform (Rust target, ONNX Runtime
-# files, what is deployed, the deploy folder, ui-demo) is in mk/$(PLATFORM).mk; the rest is here.
+# Windows (cross-compiled) in WSL. `make dist` assembles the plugin in dist/ (gitignored);
+# `make deploy` copies it to where Lightroom loads it. What differs per platform (Rust target,
+# ONNX Runtime files, the apps, the deploy folder, reveal, ui-demo) is in mk/$(PLATFORM).mk;
+# the rest is here.
 PLATFORM    ?= $(if $(filter Darwin,$(shell uname -s)),macos,windows)
 PLUGIN      := Klassifier.lrplugin
+DIST        := dist/$(PLUGIN)
 RELEASE      = klassifier/target/$(TARGET)/release
 
 # Runtime files that aren't committed: ONNX Runtime ($(RUNTIME_DIR), per platform) and the
-# SigLIP model (shared). `make fetch` downloads them; `make deploy` copies them next to the app.
+# SigLIP model (shared). `make fetch` downloads them; `make dist` puts them next to the apps.
 VENDOR      := vendor
 CACHE       := $(VENDOR)/.cache
 RUNTIME_DIR := $(VENDOR)/$(PLATFORM)
@@ -30,12 +33,13 @@ extract = mkdir -p $(@D) && python3 -I -c 'import sys, zipfile; open(sys.argv[3]
 # $(call extract-tgz,<tgz>,<member>): the same for a .tgz.
 extract-tgz = mkdir -p $(@D) && python3 -I -c 'import sys, tarfile; open(sys.argv[3], "wb").write(tarfile.open(sys.argv[1]).extractfile(sys.argv[2]).read())' $(1) $(2) $@
 
-.PHONY: all bump build cargo-build lint test clippy fetch check-version deploy ui-demo clean
+.PHONY: all bump build cargo-build lint test clippy fetch dist check-version deploy reveal ui-demo clean
 
 all: deploy
 
-# Sets TARGET, RUNTIME, DEPLOY_FILES, DEPLOY_DIR, TEST_FLAGS, LUAC, and optionally
-# PACKAGE (build steps after cargo) and LUAC_DEP (a rule that builds $(LUAC)).
+# Sets TARGET, RUNTIME, DIST_FILES (the apps), DEPLOY_DIR, TEST_FLAGS, LUAC, the reveal and
+# ui-demo rules, and optionally PACKAGE (build steps after cargo) and LUAC_DEP (a rule that
+# builds $(LUAC)).
 include mk/$(PLATFORM).mk
 
 cargo-build:
@@ -84,11 +88,20 @@ bump:
 check-version:
 	tools/check-version.sh $(PLUGIN) "$(DEPLOY_DIR)/$(PLUGIN)"
 
-# rsync only copies changed files, so the large model files are copied once.
-deploy: check-version lint clippy build fetch
+# The finished plugin folder: the plugin's Lua, the apps, ONNX Runtime, the model and the
+# licenses. The model files are hard links to vendor/'s, so dist/ adds no 800 MB copy.
+dist: build fetch
+	mkdir -p $(DIST)/models/siglip
+	rsync -rt --delete --exclude=/models "$(PLUGIN)/" "$(RUNTIME_DIR)/" \
+		$(DIST_FILES) LICENSE THIRD_PARTY_NOTICES.md licenses $(DIST)/
+	ln -f $(MODELS) $(DIST)/models/siglip/
+	@echo "Built $(DIST)"
+
+# A copy of dist/, so what Lightroom runs changes only here, after the checks. rsync only
+# copies changed files, so the large model files are copied once.
+deploy: check-version lint clippy dist
 	mkdir -p "$(DEPLOY_DIR)/$(PLUGIN)"
-	rsync -rt --delete --exclude=.deployed-version "$(PLUGIN)/" "$(RUNTIME_DIR)/" "$(VENDOR)/models" \
-		$(DEPLOY_FILES) LICENSE THIRD_PARTY_NOTICES.md licenses "$(DEPLOY_DIR)/$(PLUGIN)/"
+	rsync -rt --delete --exclude=.deployed-version "$(DIST)/" "$(DEPLOY_DIR)/$(PLUGIN)/"
 	tools/check-version.sh --stamp $(PLUGIN) "$(DEPLOY_DIR)/$(PLUGIN)"
 	@echo "Deployed to $(DEPLOY_DIR)/$(PLUGIN)"
 
@@ -101,3 +114,4 @@ DEMO_DIR    := $(CACHE)/ui-demo
 
 clean:
 	cd klassifier && cargo clean
+	rm -rf dist

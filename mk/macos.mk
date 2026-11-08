@@ -7,7 +7,7 @@ TEST_FLAGS   := --target $(TARGET)
 # The review window is an app bundle, so it has the Klassifier name and icon in the Dock and
 # Cmd-Tab. The plugin runs its binary directly (Exec.lua). klassifier is a plain binary.
 APP          := $(RELEASE)/Klassifier.app
-DEPLOY_FILES  = $(RELEASE)/klassifier $(APP)
+DIST_FILES    = $(RELEASE)/klassifier $(APP)
 PACKAGE      := app
 # The bundle's version: Cargo.toml's, and Info.lua's build number.
 VERSION       = $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' klassifier/Cargo.toml | head -n 1)
@@ -55,6 +55,10 @@ app: cargo-build
 	cp $(RELEASE)/klassifier-ui $(APP)/Contents/MacOS/
 	cp klassifier/assets/klassifier.icns $(APP)/Contents/Resources/
 	codesign --force --sign - $(APP)
+
+# Shows the deployed plugin in Finder.
+reveal:
+	open "$(DEPLOY_DIR)/$(PLUGIN)"
 
 # Opens the review window. The stand-in thumbnails are made by the same native build of the app.
 ui-demo: build
