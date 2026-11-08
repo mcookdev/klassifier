@@ -24,8 +24,9 @@ TOKENIZER_SHA256 := 4a17c975210be5ab4c36b47d8dae4eefb866dbfb1e676e394aad85dc30a3
 MODELS      := $(MODEL_DIR)/vision_model.onnx $(MODEL_DIR)/text_model.onnx $(MODEL_DIR)/tokenizer.json
 
 # $(call download,<url>,<sha256>): fetch to a .part file, check its SHA-256, then keep it, so
-# an interrupted or altered download is never used.
-download = mkdir -p $(@D) && curl -fL --retry 3 -o $@.part $(1) && \
+# an interrupted or altered download is never used. --retry-all-errors retries a reset
+# connection too, which plain --retry treats as permanent (lua.org drops some CI connections).
+download = mkdir -p $(@D) && curl -fL --retry 3 --retry-all-errors -o $@.part $(1) && \
 	{ echo "$(2)  $@.part" | sha256sum -c --quiet - || { rm -f $@.part; echo "SHA-256 mismatch: $(1)" >&2; exit 1; }; } && \
 	mv $@.part $@
 # $(call extract,<zip>,<member>): copy one file out of a zip (a .nupkg is one) to $@.

@@ -20,8 +20,9 @@ permissions:
 env:
   DIST: ${{ github.event_name == 'workflow_dispatch' }}
 
+# A manual run has its own group, so it doesn't cancel the push check on the same branch.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,7 +39,12 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: klassifier
-      # ONNX Runtime, the model, and luac 5.1's source and build.
+      # luac 5.1's source and build, on every run: lua.org is often unreachable from CI.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/.cache/lua-*
+          key: luac-macos-${{ hashFiles('mk/macos.mk') }}
+      # ONNX Runtime and the model, on demand (and luac again, in the same vendor/).
       - if: env.DIST == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
