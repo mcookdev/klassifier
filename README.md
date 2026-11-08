@@ -139,8 +139,14 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
 - Tick or untick a label by clicking it, or press its number: 1-9 for the
   first nine, 0 for the tenth. The photo then shows "(edited)" and gets exactly
   the ticked labels, even none. The totals update as you go.
-- **Accept All** (or Ctrl+Enter) adds each photo's keywords: the ticked ones
-  for photos you changed, the suggested ones for the rest. Photos with nothing
+- **Save Photo** (or Enter) under the labels adds the selected photo's ticked
+  keywords right away, while the window stays open, so you can check them in
+  Lightroom or save photos as you go. The photo then shows "(saved)" in green
+  and can't be changed any more. Each save is its own step in **Edit > Undo**.
+  If Lightroom's catalog is busy, nothing is added, the panel says why, and you
+  can try again. Photos with nothing ticked can't be saved.
+- **Accept All** (or Ctrl+Enter) adds the keywords of every photo not saved
+  yet: the ticked ones for photos you changed, the suggested ones for the rest. Photos with nothing
   ticked or suggested get nothing. Keywords are only added,
   never removed, and a keyword that already exists is reused, whatever its
   case (`bird` reuses `Bird`). New keywords are top level, named as in the
@@ -153,8 +159,9 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
   in **Edit > Undo**. If no photo would get a keyword, it says so and adds
   nothing. If Lightroom's catalog is busy, nothing is added and the review
   window opens again with your changes, so you can click **Accept All** again.
-- **Cancel** (or Esc), or closing the window, changes nothing. If you changed
-  any photo, it asks before throwing the changes away.
+- **Cancel** (or Esc), or closing the window, adds nothing more: photos saved
+  with Save Photo keep their keywords. If you changed any photo you didn't
+  save, it asks before throwing the changes away.
 - If no photo could be classified, a report opens instead of the review
   window: how many failed or were unsupported or skipped, what it ran on, the
   label set, and each photo's error. The errors can be selected and copied
