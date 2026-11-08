@@ -1,5 +1,4 @@
-//! Review window data: the exchange format with the plugin, and the texts that must match
-//! what `Review.lua` showed.
+//! Review window data: the exchange format with the plugin, and the texts the window shows.
 
 use std::path::PathBuf;
 
@@ -79,7 +78,7 @@ fn unescapes_notes() {
 }
 
 #[test]
-fn status_matches_review_lua() {
+fn status_counts_kept_keywords() {
     assert_eq!(item(vec![], 1).status(), "0 Keywords");
     assert_eq!(item(vec![label("dog", true), label("cat", false)], 1).status(), "1 Keyword");
     let mut edited = item(vec![label("dog", true), label("cat", false), label("sofa", false)], 1);
@@ -94,7 +93,7 @@ fn status_matches_review_lua() {
 }
 
 #[test]
-fn totals_match_review_lua() {
+fn totals_count_every_photo_of_a_file() {
     let none = vec![item(vec![label("dog", false)], 1)];
     assert_eq!(totals_line(&none), "1 photo to review. No keywords to add.");
 

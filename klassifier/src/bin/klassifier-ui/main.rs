@@ -190,8 +190,6 @@ fn show_report(report: ReportInput, screenshot_png: Option<&Path>) -> Result<()>
     Ok(())
 }
 
-/// Builds the window for `input`, with photo `select` in the side panel. `threaded`: load
-/// images on worker threads (false for screenshots, which have no event loop to deliver them).
 /// What the review window ends with: the outcome, and where the window was.
 #[derive(Clone, Copy)]
 struct Closed {
@@ -202,6 +200,8 @@ struct Closed {
 /// The review window, its items and how it closed (see build).
 type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>);
 
+/// Builds the window for `input`, with photo `select` in the side panel. `threaded`: load
+/// images on worker threads (false for screenshots, which have no event loop to deliver them).
 fn build(input: ReviewInput, select: usize, threaded: bool) -> Result<Built> {
     let ui = ReviewWindow::new()?;
     let items = Rc::new(RefCell::new(input.items));

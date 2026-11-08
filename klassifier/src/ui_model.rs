@@ -167,7 +167,7 @@ impl Item {
         self.labels[k].chosen = !self.labels[k].chosen;
     }
 
-    /// "3 Keywords", "1 Keyword", "0 Keywords", "2 Keywords (edited)", as `Review.itemStatus`.
+    /// "3 Keywords", "1 Keyword", "0 Keywords", "2 Keywords (edited)".
     pub fn status(&self) -> String {
         let text = plural(self.keyword_count(), "Keyword");
         if self.edited {
@@ -195,7 +195,7 @@ pub fn totals(items: &[Item]) -> (usize, usize) {
     (keywords, photos)
 }
 
-/// "12 photos to review. 30 keywords to add on 11 photos.", as `totalsLine` in `Review.lua`.
+/// "12 photos to review. 30 keywords to add on 11 photos."
 pub fn totals_line(items: &[Item]) -> String {
     let (keywords, photos) = totals(items);
     let reviewed = plural(items.len(), "photo");
@@ -325,7 +325,7 @@ pub fn parse_report(text: &str) -> Result<ReportInput> {
     Ok(report)
 }
 
-/// The window's output: `outcome`, the edited `items`' choices, and where the window was.
+/// The options dialog's input (`--options`).
 #[derive(Debug, Default, PartialEq)]
 pub struct OptionsInput {
     pub count: usize,
@@ -408,6 +408,7 @@ pub fn write_options_result(
     out.flush()
 }
 
+/// The window's output: `outcome`, the edited `items`' choices, and where the window was.
 pub fn write_result(
     out: &mut impl Write,
     outcome: Outcome,
