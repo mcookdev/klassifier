@@ -95,6 +95,12 @@ function Options.ask(context, photoCount)
 		elseif fields[1] == 'ONLYHINTS' then chosen.onlyHints = fields[2] == '1'
 		end
 	end
+	if not result then
+		local why = 'No result from klassifier-ui.exe:\n' .. output:sub(-1000)
+		logger:error(why)
+		LrDialogs.message('Classify Photos', 'The options window failed:\n' .. why, 'critical')
+		return nil
+	end
 	if result ~= 'ok' then return nil end
 	local known = false
 	for _, name in ipairs(sets) do known = known or name == chosen.labelSet end
