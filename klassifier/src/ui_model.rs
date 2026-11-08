@@ -6,7 +6,9 @@
 //! ```text
 //! #klassifier-ui<TAB>review<TAB>1
 //! WINDOW<TAB><x><TAB><y><TAB><width><TAB><height><TAB><maximized 0|1>   (optional)
-//! NOTES<TAB><text>
+//! NOTES<TAB><text>[<TAB><link><TAB><text after>]
+//! REPORT<TAB><summary, escaped as NOTES>                                (optional: the link's report)
+//! LINE<TAB><text>                                                      (one per report line, as for --report)
 //! SAVEFILES<TAB><requests file><TAB><answers file>                     (optional: Save Keywords)
 //! ITEM<TAB><n><TAB><name><TAB><copy note><TAB><photo count><TAB><edited 0|1><TAB><stand-in thumbnail><TAB><Lightroom thumbnail><TAB><saved 0|1>
 //! LABEL<TAB><n><TAB><label><TAB><suggested 0|1><TAB><chosen 0|1><TAB><keyword "Parent > Child", or empty>
@@ -15,7 +17,8 @@
 //! Items are numbered from 1, in order, and each item's LABEL lines follow its ITEM line, best
 //! label first. WINDOW is where the window was last closed, as the output gave it: its
 //! outer top-left corner and inner size, in physical pixels. In NOTES, `\n` stands for a line
-//! break and `\\` for a backslash. The stand-in
+//! break and `\\` for a backslash. NOTES' optional link ("2 failed") opens a report like
+//! `--report`'s: the REPORT summary, then the LINE lines. The stand-in
 //! thumbnail is the one `klassifier.exe --thumbs` writes; the Lightroom one, rendered with the
 //! photo's edits, may appear later. Neither file has to exist yet. `saved` (optional, 0 if
 //! missing) marks a photo whose keywords were already written by Save Keywords.
@@ -117,6 +120,11 @@ pub enum Save {
 #[derive(Debug, Default, PartialEq)]
 pub struct ReviewInput {
     pub notes: String,
+    /// Shown after `notes` as a link that opens `report`, then `notes_after`. Empty: no link.
+    pub notes_link: String,
+    pub notes_after: String,
+    /// The link's report; its `window` is unused.
+    pub report: ReportInput,
     pub items: Vec<Item>,
     pub window: Option<Geometry>,
     pub save_files: Option<SaveFiles>,
@@ -381,7 +389,12 @@ pub fn parse_review(text: &str) -> Result<ReviewInput> {
     for (n, line) in body(text, "review")? {
         let fields: Vec<&str> = line.split('\t').collect();
         match fields[0] {
-            "NOTES" => input.notes = unescape(fields.get(1).copied().unwrap_or("")),
+            "NOTES" => {
+                let field = |i: usize| unescape(fields.get(i).copied().unwrap_or(""));
+                (input.notes, input.notes_link, input.notes_after) = (field(1), field(2), field(3));
+            }
+            "REPORT" => input.report.summary = unescape(fields.get(1).copied().unwrap_or("")),
+            "LINE" => input.report.lines.push(line.split_once('\t').map_or("", |(_, rest)| rest).to_string()),
             "WINDOW" => input.window = parse_window(&fields[1..]),
             "SAVEFILES" => {
                 if fields.len() < 3 || fields[1].is_empty() || fields[2].is_empty() {

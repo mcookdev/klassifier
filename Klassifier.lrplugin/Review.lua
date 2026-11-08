@@ -86,12 +86,19 @@ function Review.copyNote(item)
 	return '+' .. (copies == 1 and '1 virtual copy' or noun)
 end
 
--- The review window's input lines for `items` (ui_model.rs describes them). `saveFiles` are
--- the requests and answers files for Save Keywords.
+-- The review window's input lines for `items` (ui_model.rs describes them). `notes` is as for
+-- Review.show. `saveFiles` are the requests and answers files for Save Keywords.
 local function inputLines(items, notes, saveFiles)
 	local lines = { '#klassifier-ui\treview\t1' }
 	Exec.addSavedWindow(lines, 'reviewWindow')
-	lines[#lines + 1] = 'NOTES\t' .. Exec.escape(notes)
+	if notes.report then
+		lines[#lines + 1] = table.concat({
+			'NOTES', Exec.escape(notes.before), Exec.escape(notes.failed), Exec.escape(notes.after) }, '\t')
+		lines[#lines + 1] = 'REPORT\t' .. Exec.escape(notes.report.summary)
+		for _, line in ipairs(notes.report.lines) do lines[#lines + 1] = 'LINE\t' .. Exec.clean(line) end
+	else
+		lines[#lines + 1] = 'NOTES\t' .. Exec.escape(notes.before .. notes.failed .. notes.after)
+	end
 	lines[#lines + 1] = 'SAVEFILES\t' .. Exec.clean(saveFiles.requests) .. '\t' .. Exec.clean(saveFiles.answers)
 	for n, item in ipairs(items) do
 		local set = item.chosen or item.suggested
@@ -218,9 +225,10 @@ local function watchSaves(files, items, saveItem)
 	end
 end
 
--- Shows the review window for `items` (at least one). `notes` is extra header text (skipped
--- files, cancel). `saveItem(item)` writes one item's keywords for Save Keywords: it returns the
--- keyword count, or nil if the catalog was busy. Saved items get `saved = true`. Returns 'ok'
+-- Shows the review window for `items` (at least one). `notes` is the extra header text (label
+-- set, skipped files, cancel): `before .. failed .. after`, where `failed` ("2 failed") links to
+-- `report` ({ summary, lines }, as for showReport) if there is one. `saveItem(item)` writes one
+-- item's keywords for Save Keywords: it returns the keyword count, or nil if the catalog was busy. Saved items get `saved = true`. Returns 'ok'
 -- (Save All) or 'cancel'.
 function Review.show(context, items, notes, saveItem)
 	local inFile = Exec.tempFile('klassifier-review.txt')

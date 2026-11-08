@@ -214,6 +214,9 @@ export component ReviewWindow inherits Window {
     in property <[GridRow]> rows;
     in property <string> totals;
     in property <string> notes;
+    // Shown after the notes as a link that calls show-report ("2 failed"), then notes-after.
+    in property <string> notes-link;
+    in property <string> notes-after;
     // Photos the user changed and didn't save; Cancel asks before throwing their changes away.
     in property <int> edited-count;
     // Photos saved with Save Keywords: Cancel leaves their keywords.
@@ -252,6 +255,8 @@ export component ReviewWindow inherits Window {
     callback toggle(int);
     // A key the window doesn't handle itself (arrows, digits...); true if it was used.
     callback key(string) -> bool;
+    // The notes link was clicked: show why photos failed.
+    callback show-report();
 
     changed columns => {
         root.columns-changed(root.columns);
@@ -422,10 +427,18 @@ export component ReviewWindow inherits Window {
                             color: #e0e0e0;
                             font-size: 14px;
                         }
-                        if root.notes != "": Text {
+                        if root.notes != "" && root.notes-link == "": Text {
                             text: root.notes;
                             color: #a0a0a0;
                             wrap: word-wrap;
+                        }
+                        if root.notes-link != "": StyledText {
+                            text: @markdown("\{root.notes}[<u>\{root.notes-link}</u>](report)\{root.notes-after}");
+                            default-color: #a0a0a0;
+                            link-color: #7ab4f0;
+                            link-clicked => {
+                                root.show-report();
+                            }
                         }
                     }
                     VerticalLayout {

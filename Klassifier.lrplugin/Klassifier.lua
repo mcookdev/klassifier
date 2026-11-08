@@ -67,7 +67,7 @@ local function splitList(field)
 end
 
 -- Counts one result's failure, if it failed, and adds its report line (see showReport in
--- Review.lua; the report only opens when no photo classified).
+-- Review.lua; the review's "N failed" link shows the same lines).
 local function describe(path, fields, counts, lines)
 	local name = LrPathUtils.leafName(path)
 	if not fields then
@@ -286,26 +286,27 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 		describe(r.path, r.fields, counts, lines)
 	end
 
+	local cancelNote = cancelled and string.format('\nCancelled after %d of %d photos.', #results, #paths) or ''
+	local stats = string.format(
+		'%d failed, %d unsupported. Skipped %d video(s), %d duplicate(s). Ran on %s.\nLabels: %s.%s',
+		counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown', describeLabels(options), cancelNote)
 	local items = buildItems(entries, results, thumbs)
 	if #items == 0 then
 		-- Nothing to review: say why instead.
-		local summary = string.format(
-			'No photo could be classified.\n' ..
-			'%d failed, %d unsupported. Skipped %d video(s), %d duplicate(s). Ran on %s.\n' ..
-			'Labels: %s.',
-			counts.failed, counts.unsupported, videos, duplicates, backend or 'unknown', describeLabels(options))
-		if cancelled then
-			summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
-		end
 		Exec.running = 'report'
-		Review.showReport(context, summary, lines)
+		Review.showReport(context, 'No photo could be classified.\n' .. stats, lines)
 		return
 	end
 
-	local notes = string.format('Labels: %s. %d failed, %d unsupported. Skipped %d video(s), %d duplicate(s).',
-		describeLabels(options), counts.failed, counts.unsupported, videos, duplicates)
-	if cancelled then
-		notes = notes .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
+	-- "N failed" links to the errors when there are any.
+	local notes = {
+		before = string.format('Labels: %s. ', describeLabels(options)),
+		failed = string.format('%d failed', counts.failed),
+		after = string.format(', %d unsupported. Skipped %d video(s), %d duplicate(s).%s',
+			counts.unsupported, videos, duplicates, cancelNote),
+	}
+	if counts.failed > 0 then
+		notes.report = { summary = 'Some photos could not be classified.\n' .. stats, lines = lines }
 	end
 	-- Reopens the review (choices kept) if the catalog is busy when writing.
 	local catalog = LrApplication.activeCatalog()

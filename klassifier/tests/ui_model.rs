@@ -65,6 +65,27 @@ fn parses_review_input() {
     assert_eq!(parse_review("#klassifier-ui\treview\t1\n").unwrap().save_files, None);
 }
 
+/// "N failed" in the notes is a link to the errors, which follow as REPORT and LINE lines.
+#[test]
+fn parses_review_failure_report() {
+    let text = "#klassifier-ui\treview\t1\n\
+NOTES\tLabels: General. \t1 failed\t, 0 unsupported.\\nCancelled.\n\
+REPORT\tSome photos could not be classified.\\nRan on CPU.\n\
+LINE\ta.tif: cannot decode\twith a tab\n\
+ITEM\t1\ta\t\t1\t0\ts\tr\n";
+    let input = parse_review(text).unwrap();
+    assert_eq!(input.notes, "Labels: General. ");
+    assert_eq!(input.notes_link, "1 failed");
+    assert_eq!(input.notes_after, ", 0 unsupported.\nCancelled.");
+    assert_eq!(input.report.summary, "Some photos could not be classified.\nRan on CPU.");
+    assert_eq!(input.report.lines, ["a.tif: cannot decode\twith a tab"]);
+    assert_eq!(input.items.len(), 1);
+
+    let plain = parse_review(SAMPLE).unwrap();
+    assert_eq!((plain.notes_link.as_str(), plain.notes_after.as_str()), ("", ""));
+    assert!(plain.report.lines.is_empty());
+}
+
 #[test]
 fn rejects_bad_input() {
     assert!(parse_review("ITEM\t1\n").is_err(), "missing header");

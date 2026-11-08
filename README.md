@@ -125,7 +125,8 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
   the photos in a scrolling grid that fills the window's width, each with its
   file name and how many keywords it will get ("3 Keywords", or "0 Keywords"
   when nothing was suggested). The top shows the totals, the label set, and
-  how many files failed, were unsupported or were skipped.
+  how many files failed, were unsupported or were skipped. When some failed,
+  "N failed" is a link that opens the report below with each photo's error.
 - Thumbnails show Lightroom's rendering of each photo, with your edits and
   crops. For photos Lightroom has no previews of yet, rendering takes it about
   0.4 s each, so the grid first shows the image the app read (for RAW files,

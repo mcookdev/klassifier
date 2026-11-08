@@ -171,9 +171,7 @@ fn run() -> Result<()> {
 fn show_report(report: ReportInput, screenshot_png: Option<&Path>) -> Result<()> {
     let closed_at = Rc::new(StdCell::new(None));
     let make = || -> Result<ReportWindow> {
-        let ui = ReportWindow::new()?;
-        ui.set_summary(report.summary.as_str().into());
-        ui.set_report(report.lines.join("\n").into());
+        let ui = report_window(&report)?;
         let (weak, at) = (ui.as_weak(), closed_at.clone());
         ui.on_ok(move || {
             if let Some(ui) = weak.upgrade() {
@@ -200,6 +198,41 @@ fn show_report(report: ReportInput, screenshot_png: Option<&Path>) -> Result<()>
     Ok(())
 }
 
+/// The report window for `report`, not yet shown.
+fn report_window(report: &ReportInput) -> Result<ReportWindow> {
+    let ui = ReportWindow::new()?;
+    ui.set_summary(report.summary.as_str().into());
+    ui.set_report(report.lines.join("\n").into());
+    Ok(ui)
+}
+
+/// The review's report window, once its notes link was clicked.
+type OpenReport = Rc<RefCell<Option<ReportWindow>>>;
+
+/// Shows the review's report (from its notes link), opening it the first time. OK hides it.
+fn show_review_report(report: &ReportInput, open: &OpenReport) -> Result<()> {
+    let mut open = open.borrow_mut();
+    if open.is_none() {
+        let ui = report_window(report)?;
+        let weak = ui.as_weak();
+        ui.on_ok(move || {
+            if let Some(ui) = weak.upgrade() {
+                let _ = ui.hide();
+            }
+        });
+        win::place(&ui, None, Fit::Large);
+        *open = Some(ui);
+    }
+    open.as_ref().map_or(Ok(()), |ui| Ok(ui.show()?))
+}
+
+/// Hides the review's report, so the event loop ends with the review window.
+fn hide_review_report(open: &OpenReport) {
+    if let Some(ui) = open.borrow().as_ref() {
+        let _ = ui.hide();
+    }
+}
+
 /// What the review window ends with: the outcome, and where the window was.
 #[derive(Clone, Copy)]
 struct Closed {
@@ -218,8 +251,8 @@ enum Saver {
     Instant,
 }
 
-/// The review window, its items and how it closed (see build).
-type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>);
+/// The review window, its items, how it closed and its report window (see build).
+type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>, OpenReport);
 
 /// Builds the window for `input`, with photo `select` in the side panel. `threaded`: load
 /// images on worker threads (false for screenshots, which have no event loop to deliver them).
@@ -231,14 +264,24 @@ fn build(input: ReviewInput, select: usize, saver: Saver, threaded: bool) -> Res
     let model = grid::GridModel::new(items.clone(), &ui, threaded);
     ui.set_rows(ModelRc::from(model.clone() as Rc<dyn Model<Data = GridRow>>));
     ui.set_notes(input.notes.into());
+    ui.set_notes_link(input.notes_link.into());
+    ui.set_notes_after(input.notes_after.into());
+    let report = OpenReport::default();
+    let (failures, open) = (input.report, report.clone());
+    ui.on_show_report(move || {
+        if let Err(e) = show_review_report(&failures, &open) {
+            eprintln!("cannot show the report: {e:#}");
+        }
+    });
     show_totals(&ui, &items.borrow());
     ui.set_selected(select as i32);
     model.show_panel(&ui, select);
 
     let closed = Rc::new(StdCell::new(Closed { outcome: Outcome::Cancel, window: None }));
     let finish = |outcome: Outcome| {
-        let (weak, closed) = (ui.as_weak(), closed.clone());
+        let (weak, closed, report) = (ui.as_weak(), closed.clone(), report.clone());
         move || {
+            hide_review_report(&report);
             if let Some(ui) = weak.upgrade() {
                 closed.set(Closed { outcome, window: win::geometry(ui.window()) });
                 let _ = ui.hide();
@@ -320,7 +363,7 @@ fn build(input: ReviewInput, select: usize, saver: Saver, threaded: bool) -> Res
             _ => false,
         }
     });
-    Ok((ui, items, closed))
+    Ok((ui, items, closed, report))
 }
 
 fn show_totals(ui: &ReviewWindow, items: &[Item]) {
@@ -401,7 +444,7 @@ fn review(input: ReviewInput, select: usize, saver: Saver) -> Result<(Closed, Ve
         Saver::Files(files) => Some(files.clone()),
         _ => None,
     };
-    let (ui, items, closed) = build(input, select, saver, true)?;
+    let (ui, items, closed, report) = build(input, select, saver, true)?;
     let _answers = files.map(|files| watch_answers(&ui, items.clone(), files));
     let (weak, c) = (ui.as_weak(), closed.clone());
     ui.window().on_close_requested(move || match weak.upgrade() {
@@ -411,6 +454,7 @@ fn review(input: ReviewInput, select: usize, saver: Saver) -> Result<(Closed, Ve
         }
         Some(ui) => {
             c.set(Closed { outcome: Outcome::Cancel, window: win::geometry(ui.window()) });
+            hide_review_report(&report);
             CloseRequestResponse::HideWindow
         }
         None => CloseRequestResponse::HideWindow,
@@ -459,7 +503,19 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
             }
         })
         .collect();
-    Ok(ReviewInput { notes: "Labels: demo. 0 failed, 0 unsupported.".into(), items, window: None, save_files: None })
+    Ok(ReviewInput {
+        notes: "Labels: demo. ".into(),
+        notes_link: "1 failed".into(),
+        notes_after: ", 0 unsupported.".into(),
+        report: ReportInput {
+            summary: "Some photos could not be classified (a made-up error for the demo).".into(),
+            lines: vec!["IMG_0001.tif: cannot decode image: an example error".into()],
+            window: None,
+        },
+        items,
+        window: None,
+        save_files: None,
+    })
 }
 
 /// Asks for the options until the user classifies or cancels (or saves a picture of the
