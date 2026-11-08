@@ -137,11 +137,27 @@ export component OptionsWindow inherits Window {
                         horizontal-alignment: right;
                         vertical-alignment: center;
                     }
-                    hints-edit := LineEdit {
+                    // The placeholder is our own Text over the LineEdit: Fluent draws its
+                    // placeholder in text-secondary, too close to typed text, and doesn't
+                    // let us change the color. x matches LineEdit's 12px text padding.
+                    Rectangle {
                         horizontal-stretch: 1;
-                        placeholder-text: "makeup, hair styling, backstage";
-                        accepted => {
-                            root.try-classify();
+                        min-height: hints-edit.min-height;
+                        hints-edit := LineEdit {
+                            width: 100%;
+                            height: 100%;
+                            accepted => {
+                                root.try-classify();
+                            }
+                        }
+                        if hints-edit.text == "": Text {
+                            x: 12px;
+                            width: parent.width - 24px;
+                            height: 100%;
+                            text: "makeup, hair styling, backstage";
+                            color: #8a8a8a;
+                            vertical-alignment: center;
+                            overflow: elide;
                         }
                     }
                 }
