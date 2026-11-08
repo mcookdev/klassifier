@@ -225,6 +225,7 @@ type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>);
 /// images on worker threads (false for screenshots, which have no event loop to deliver them).
 fn build(input: ReviewInput, select: usize, saver: Saver, threaded: bool) -> Result<Built> {
     let ui = ReviewWindow::new()?;
+    ui.set_version(env!("CARGO_PKG_VERSION").into());
     ui.set_can_save_keywords(!matches!(saver, Saver::None));
     let items = Rc::new(RefCell::new(input.items));
     let model = grid::GridModel::new(items.clone(), &ui, threaded);

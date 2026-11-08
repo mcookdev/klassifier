@@ -166,7 +166,7 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
   window: how many failed or were unsupported or skipped, what it ran on, the
   label set, and each photo's error. The errors can be selected and copied
   (Ctrl+C). OK, Enter or Esc closes it. It also opens where you last left it.
-- **About** shows the Slint attribution its license asks for.
+- The **ⓘ** button (About) shows the version, copyright and credits, and the Slint attribution its license asks for.
 - While Classify Photos is running or its review is open, starting it again
   says so instead of opening a second one.
 

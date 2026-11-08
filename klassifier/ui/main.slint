@@ -170,6 +170,34 @@ component LabelRow inherits Rectangle {
     }
 }
 
+// A borderless icon button: only its icon until hovered (std-widgets has no flat Button).
+component FlatIconButton inherits Rectangle {
+    in property <image> icon;
+    callback clicked();
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    background: touch.pressed ? #505050 : touch.has-hover ? #3c3c3c : transparent;
+    accessible-role: button;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    Image {
+        source: root.icon;
+        colorize: touch.has-hover ? #ffffff : #c8c8c8;
+        width: 18px;
+        height: 18px;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 export component ReviewWindow inherits Window {
     title: "Review keywords";
     icon: @image-url("../assets/klassifier.png");
@@ -181,6 +209,8 @@ export component ReviewWindow inherits Window {
     default-font-size: 12px;
     forward-focus: keys;
 
+    // Shown in About.
+    in property <string> version;
     in property <[GridRow]> rows;
     in property <string> totals;
     in property <string> notes;
@@ -249,7 +279,8 @@ export component ReviewWindow inherits Window {
     about := PopupWindow {
         x: (root.width - self.width) / 2;
         y: (root.height - self.height) / 2;
-        width: 420px;
+        width: 440px;
+        close-policy: close-on-click-outside;
         Rectangle {
             background: #1e1e1e;
             border-color: #555555;
@@ -257,13 +288,55 @@ export component ReviewWindow inherits Window {
             border-radius: 4px;
             VerticalLayout {
                 padding: 16px;
-                spacing: 12px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Image {
+                        source: @image-url("../assets/klassifier.png");
+                        width: 48px;
+                        height: 48px;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: "Klassifier";
+                            color: #e0e0e0;
+                            font-size: 16px;
+                            font-weight: 600;
+                        }
+                        Text {
+                            text: "Version \{root.version}";
+                            color: #a0a0a0;
+                        }
+                    }
+                }
                 Text {
-                    text: "Klassifier: review keywords";
-                    color: #e0e0e0;
-                    font-size: 14px;
+                    text: "Suggests keywords for your Lightroom Classic photos. Everything runs on this computer; no photos are uploaded.";
+                    color: #d0d0d0;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "© 2026 Michael Cook. MIT License.";
+                    color: #a0a0a0;
+                }
+                Text {
+                    text: "Uses the SigLIP model by Google (Apache 2.0), ONNX Runtime and DirectML by Microsoft, and rawler (LGPL 2.1). See THIRD_PARTY_NOTICES.md in the plug-in folder.";
+                    color: #a0a0a0;
+                    wrap: word-wrap;
                 }
                 AboutSlint { }
+                HorizontalLayout {
+                    alignment: end;
+                    Button {
+                        text: "Close";
+                        primary: true;
+                        clicked => {
+                            about.close();
+                            keys.focus();
+                        }
+                    }
+                }
             }
         }
     }
@@ -359,8 +432,9 @@ export component ReviewWindow inherits Window {
                         alignment: center;
                         HorizontalLayout {
                             spacing: 8px;
-                            Button {
-                                text: "About";
+                            FlatIconButton {
+                                icon: @image-url("../assets/info.svg");
+                                accessible-label: "About Klassifier";
                                 clicked => {
                                     about.show();
                                 }

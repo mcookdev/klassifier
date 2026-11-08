@@ -49,7 +49,7 @@ license. Full license texts are in the `licenses/` folder.
 - License: Slint Royalty-free Desktop, Mobile, and Web Applications License
   2.0 (`licenses/Slint-Royalty-free-2.0.md`). Slint is also available under
   GPL-3.0; Klassifier uses the royalty-free license. As it requires, the
-  review window's **About** button shows Slint's `AboutSlint` attribution.
+  review window's About (ⓘ) button shows Slint's `AboutSlint` attribution.
 
 ## Rust crates
 
