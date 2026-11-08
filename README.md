@@ -31,14 +31,15 @@ Lightroom edits (see [How RAW files are read](#how-raw-files-are-read)).
 
 ## Requirements
 
-- Adobe Lightroom Classic (SDK 6.0 or later) on Windows, or on macOS 12 or
-  later on an Apple Silicon (M-series) Mac
+- Adobe Lightroom Classic (SDK 6.0 or later) on Windows, or on macOS 14
+  (Sonoma) or later on an Apple Silicon (M-series) Mac. ONNX Runtime's macOS
+  build needs macOS 14.
 - For building, on the platform's own machine (each builds for itself):
   - Windows: WSL with Rust (`cargo`), `make`, `curl`, `python3` and `rsync`
     (the last three are usually preinstalled on Ubuntu)
   - macOS: Rust (`cargo`) and the Xcode command line tools
-    (`xcode-select --install`: `make`, `cc`, `python3`), which come with
-    `curl` and `rsync`
+    (`xcode-select --install`: `make`, `cc`, `python3`). macOS comes with
+    `curl` and `rsync`.
 - Only to change the app icon: `pip install resvg-py pillow` (see
   [The app icon](#the-app-icon))
 
@@ -102,14 +103,17 @@ changed files are copied, so the model is copied once. The deploy folder is:
 - Windows: `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`
   (`/mnt/c/Users/cadre/lr-plugins` in WSL).
 - macOS: `~/Library/Application Support/Adobe/Lightroom/Modules/Klassifier.lrplugin`,
-  which Lightroom loads by itself. On macOS `make deploy` also builds
-  `Klassifier.app` around `klassifier-ui` (`Info.plist` from
-  `klassifier/assets/macos/`, the icon, an ad-hoc signature).
+  which Lightroom loads by itself.
+
+On macOS the build (`make build`, run by `make deploy`) also wraps
+`klassifier-ui` in `Klassifier.app`, with `Info.plist` from
+`klassifier/assets/macos/`, the icon and an ad-hoc signature.
 
 To deploy somewhere else:
 
 ```bash
-make deploy DEPLOY_DIR=/mnt/c/somewhere
+make deploy DEPLOY_DIR=/mnt/c/somewhere   # WSL
+make deploy DEPLOY_DIR=~/somewhere        # macOS
 ```
 
 To try the review window without Lightroom:
@@ -118,7 +122,7 @@ To try the review window without Lightroom:
 make ui-demo
 ```
 
-This opens it (on Windows, from WSL) with the photos in `test-data/` (repeated up to 500,
+This opens it (from WSL, on Windows) with the photos in `test-data/` (repeated up to 500,
 `DEMO_COUNT=...` to change) and made-up labels. Its buttons just close it.
 `make ui-demo DEMO_ARGS="--screenshot shot.png"` saves a picture of the window
 instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
@@ -139,9 +143,14 @@ On macOS:
 
 1. Run `make deploy`.
 2. Restart Lightroom Classic. It loads plug-ins from the Modules folder at
-   startup, so there's nothing to add.
+   startup, so there's nothing to add. Don't **Add** the repo's
+   `Klassifier.lrplugin` folder: it has no apps or model, and since both
+   copies have the same plugin ID, Lightroom then runs that one and disables
+   the deployed one ("klassifier-ui: No such file or directory"). If that
+   happened, **Remove** the repo entry in the Plug-in Manager and **Enable**
+   the one in the Modules folder.
 3. In **File > Plug-in Manager**, confirm "Klassifier" shows as "Installed and
-   running".
+   running", with its path in the Modules folder.
 
 ## Usage
 
@@ -382,8 +391,8 @@ click **Reload Plug-in** (or restart Lightroom).
 ## Logs
 
 The plugin writes to `Klassifier.log` in Lightroom's logs folder, including
-the exact command line used to run `klassifier`. Open it from the
-Plug-in Manager's log file link.
+the exact command line used to run `klassifier`. On macOS that's
+`~/Library/Logs/Adobe/Lightroom/LrClassicLogs/Klassifier.log`.
 
 ## Uninstalling
 
