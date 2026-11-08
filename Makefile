@@ -16,6 +16,12 @@ NUGET       := https://api.nuget.org/v3-flatcontainer
 ORT_VERSION := 1.24.4
 DML_VERSION := 1.15.4
 SIGLIP_URL  := https://huggingface.co/Xenova/siglip-base-patch16-224/resolve/4649052661e53c7000355844105f8a1792088239
+# SHA-256 of each download, pinned from the files fetched on 2026-11-04.
+ORT_SHA256       := 57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681
+DML_SHA256       := 4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9
+VISION_SHA256    := f89d41bac7f4d4b87e010a467d93f98689d708916ed22f5a07f96fdfa26f475f
+TEXT_SHA256      := 3aa7fdbd20eaa8740cce17bf82913de641fcb632a768fed59f661cdcd0c32553
+TOKENIZER_SHA256 := 4a17c975210be5ab4c36b47d8dae4eefb866dbfb1e676e394aad85dc30a3ae08
 
 ORT_PKG     := $(CACHE)/onnxruntime-directml-$(ORT_VERSION).nupkg
 DML_PKG     := $(CACHE)/directml-$(DML_VERSION).nupkg
@@ -23,8 +29,11 @@ ASSETS      := $(VENDOR)/onnxruntime.dll $(VENDOR)/onnxruntime_providers_shared.
                $(VENDOR)/DirectML.dll \
                $(MODEL_DIR)/vision_model.onnx $(MODEL_DIR)/text_model.onnx $(MODEL_DIR)/tokenizer.json
 
-# $(call download,<url>): fetch to a .part file first so an interrupted download isn't kept.
-download = mkdir -p $(@D) && curl -fL --retry 3 -o $@.part $(1) && mv $@.part $@
+# $(call download,<url>,<sha256>): fetch to a .part file, check its SHA-256, then keep it, so
+# an interrupted or altered download is never used.
+download = mkdir -p $(@D) && curl -fL --retry 3 -o $@.part $(1) && \
+	{ echo "$(2)  $@.part" | sha256sum -c --quiet - || { rm -f $@.part; echo "SHA-256 mismatch: $(1)" >&2; exit 1; }; } && \
+	mv $@.part $@
 # $(call extract,<zip>,<member>): copy one file out of a .nupkg (a zip) to $@.
 extract = mkdir -p $(@D) && python3 -I -c 'import sys, zipfile; open(sys.argv[3], "wb").write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' $(1) $(2) $@
 
@@ -57,10 +66,10 @@ clippy-windows:
 fetch: $(ASSETS)
 
 $(ORT_PKG):
-	$(call download,$(NUGET)/microsoft.ml.onnxruntime.directml/$(ORT_VERSION)/microsoft.ml.onnxruntime.directml.$(ORT_VERSION).nupkg)
+	$(call download,$(NUGET)/microsoft.ml.onnxruntime.directml/$(ORT_VERSION)/microsoft.ml.onnxruntime.directml.$(ORT_VERSION).nupkg,$(ORT_SHA256))
 
 $(DML_PKG):
-	$(call download,$(NUGET)/microsoft.ai.directml/$(DML_VERSION)/microsoft.ai.directml.$(DML_VERSION).nupkg)
+	$(call download,$(NUGET)/microsoft.ai.directml/$(DML_VERSION)/microsoft.ai.directml.$(DML_VERSION).nupkg,$(DML_SHA256))
 
 $(VENDOR)/onnxruntime.dll: $(ORT_PKG)
 	$(call extract,$<,runtimes/win-x64/native/onnxruntime.dll)
@@ -71,11 +80,14 @@ $(VENDOR)/onnxruntime_providers_shared.dll: $(ORT_PKG)
 $(VENDOR)/DirectML.dll: $(DML_PKG)
 	$(call extract,$<,bin/x64-win/DirectML.dll)
 
-$(MODEL_DIR)/vision_model.onnx $(MODEL_DIR)/text_model.onnx:
-	$(call download,$(SIGLIP_URL)/onnx/$(@F))
+$(MODEL_DIR)/vision_model.onnx:
+	$(call download,$(SIGLIP_URL)/onnx/$(@F),$(VISION_SHA256))
+
+$(MODEL_DIR)/text_model.onnx:
+	$(call download,$(SIGLIP_URL)/onnx/$(@F),$(TEXT_SHA256))
 
 $(MODEL_DIR)/tokenizer.json:
-	$(call download,$(SIGLIP_URL)/$(@F))
+	$(call download,$(SIGLIP_URL)/$(@F),$(TOKENIZER_SHA256))
 
 # Every build gets a new version (CLAUDE.md): deploying the last deployed version, or one
 # where Info.lua and Cargo.toml disagree, fails here. The version is recorded once the copy
