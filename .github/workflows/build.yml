@@ -2,7 +2,7 @@
 # other. Each job runs what `make test`, `make clippy` and `make build` run on that platform's
 # own host (mk/macos.mk, mk/windows.mk); deploying stays local. Neither job needs `make fetch`:
 # the tests use neither ONNX Runtime nor the model.
-name: CI
+name: Build
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
