@@ -15,8 +15,8 @@ use rawler::rawsource::RawSource;
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "jpe", "png", "tif", "tiff", "webp"];
 const RAW_EXTENSIONS: &[&str] = &[
-    "3fr", "arw", "cr2", "cr3", "crw", "dcr", "dng", "erf", "iiq", "kdc", "mef", "mos", "mrw",
-    "nef", "nrw", "orf", "pef", "raf", "rw2", "sr2", "srf", "srw",
+    "3fr", "arw", "cr2", "cr3", "crw", "dcr", "dng", "erf", "iiq", "kdc", "mef", "mos", "mrw", "nef", "nrw", "orf",
+    "pef", "raf", "rw2", "sr2", "srf", "srw",
 ];
 
 /// An embedded image this large is used as soon as it is found; smaller ones only if
@@ -58,11 +58,7 @@ pub struct Loaded {
 /// Loads `path` as an upright image. Unsupported formats return an error whose message
 /// starts with `unsupported:`.
 pub fn load_image(path: &Path) -> Result<Loaded> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .unwrap_or_default();
+    let ext = path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
 
     let load: fn(&Path) -> Result<Loaded> = if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
         load_image_file

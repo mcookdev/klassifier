@@ -92,12 +92,7 @@ fn parse_args(raw: Vec<OsString>) -> Result<Option<Args>> {
                 let text = fs::read_to_string(&file)
                     .with_context(|| format!("cannot read list file {}", file.to_string_lossy()))?;
                 let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-                args.paths.extend(
-                    text.lines()
-                        .map(str::trim_end)
-                        .filter(|l| !l.is_empty())
-                        .map(PathBuf::from),
-                );
+                args.paths.extend(text.lines().map(str::trim_end).filter(|l| !l.is_empty()).map(PathBuf::from));
             }
             Some("--dump") => args.dump = Some(PathBuf::from(it.next().context("--dump needs a directory")?)),
             Some("--thumbs") => args.thumbs = Some(PathBuf::from(it.next().context("--thumbs needs a directory")?)),
@@ -149,11 +144,8 @@ fn load_classifier(args: &Args) -> Result<(Classifier, HashMap<String, Vec<Strin
     let started = Instant::now();
     let exe = std::env::current_exe().context("cannot find the exe's folder")?;
     let dir = exe.parent().context("cannot find the exe's folder")?;
-    let label_files = if args.labels.is_empty() {
-        vec![dir.join("label-sets").join("General.txt")]
-    } else {
-        args.labels.clone()
-    };
+    let label_files =
+        if args.labels.is_empty() { vec![dir.join("label-sets").join("General.txt")] } else { args.labels.clone() };
     let set = siglip::read_labels(&label_files)?;
     let env = siglip::init_runtime(dir)?;
     let files = ModelFiles::in_dir(&dir.join("models").join("siglip"));

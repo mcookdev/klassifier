@@ -377,7 +377,9 @@ pub fn options_problem(hints: &str, only_hints: bool) -> Option<String> {
     }
     // The hints file is read like a label set, so "=>" would map a hint to a nested keyword.
     hints.iter().find(|h| h.contains("=>")).map(|h| {
-        format!("Hints can't map to nested keywords: remove \"=>\" from \"{h}\". Put mappings in a label set file instead.")
+        format!(
+            "Hints can't map to nested keywords: remove \"=>\" from \"{h}\". Put mappings in a label set file instead."
+        )
     })
 }
 
@@ -406,7 +408,12 @@ pub fn write_options_result(
     out.flush()
 }
 
-pub fn write_result(out: &mut impl Write, outcome: Outcome, items: &[Item], window: Option<Geometry>) -> io::Result<()> {
+pub fn write_result(
+    out: &mut impl Write,
+    outcome: Outcome,
+    items: &[Item],
+    window: Option<Geometry>,
+) -> io::Result<()> {
     writeln!(out, "#klassifier-ui\t{}", env!("CARGO_PKG_VERSION"))?;
     writeln!(out, "RESULT\t{}", outcome.as_str())?;
     for (i, item) in items.iter().enumerate().filter(|(_, item)| item.edited) {

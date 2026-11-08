@@ -99,7 +99,8 @@ fn totals_match_review_lua() {
     assert_eq!(totals_line(&none), "1 photo to review. No keywords to add.");
 
     // An item with 2 keywords on 3 photos (original + 2 virtual copies) is 6 assignments.
-    let items = vec![item(vec![label("dog", true), label("cat", true)], 3), item(vec![label("sea", true)], 1), item(vec![], 1)];
+    let items =
+        vec![item(vec![label("dog", true), label("cat", true)], 3), item(vec![label("sea", true)], 1), item(vec![], 1)];
     assert_eq!(totals(&items), (7, 4));
     assert_eq!(totals_line(&items), "3 photos to review. 7 keywords to add on 4 photos.");
 }
@@ -183,7 +184,10 @@ fn edits_reach_the_result_and_totals() {
     let mut out = Vec::new();
     write_result(&mut out, Outcome::Accept, &items, None).unwrap();
     let text = String::from_utf8(out).unwrap();
-    assert_eq!(&text.lines().collect::<Vec<_>>()[1..], ["RESULT\taccept", "EDITED\t1", "CHOSEN\t1\t1", "CHOSEN\t1\t2", "EDITED\t2"]);
+    assert_eq!(
+        &text.lines().collect::<Vec<_>>()[1..],
+        ["RESULT\taccept", "EDITED\t1", "CHOSEN\t1\t1", "CHOSEN\t1\t2", "EDITED\t2"]
+    );
 }
 
 #[test]
@@ -254,7 +258,8 @@ fn reads_the_saved_window() {
 #[test]
 fn ignores_a_bad_saved_window() {
     let header = "#klassifier-ui\treview\t1\n";
-    for line in ["WINDOW\t1\t2\t3", "WINDOW\ta\t2\t300\t300\t0", "WINDOW\t1\t2\t0\t300\t0", "WINDOW\t1\t2\t300\t300\t2"] {
+    for line in ["WINDOW\t1\t2\t3", "WINDOW\ta\t2\t300\t300\t0", "WINDOW\t1\t2\t0\t300\t0", "WINDOW\t1\t2\t300\t300\t2"]
+    {
         let input = parse_review(&format!("{header}{line}\nITEM\t1\ta\t\t1\t0\ts\tr\n")).unwrap();
         assert_eq!(input.window, None, "{line}");
         assert_eq!(input.items.len(), 1);
@@ -284,7 +289,10 @@ fn restored_window_kept_on_its_monitor() {
     let r = restore_window(Rect { x: 3500, y: 700, w: 1200, h: 800 }, work, min);
     assert_eq!(r, Rect { x: 1920 + 1920 - 1200, y: 1040 - 800, w: 1200, h: 800 });
     // Too small or too big: at least the minimum, at most the monitor.
-    assert_eq!(restore_window(Rect { x: 2000, y: 100, w: 300, h: 200 }, work, min), Rect { x: 2000, y: 100, w: 900, h: 600 });
+    assert_eq!(
+        restore_window(Rect { x: 2000, y: 100, w: 300, h: 200 }, work, min),
+        Rect { x: 2000, y: 100, w: 900, h: 600 }
+    );
     assert_eq!(restore_window(Rect { x: 1800, y: -50, w: 4000, h: 3000 }, work, min), work);
 }
 
@@ -333,7 +341,10 @@ fn hints_split_like_parse_hints_in_lua() {
 fn options_problems_match_lua() {
     assert_eq!(options_problem("", false), None);
     assert_eq!(options_problem("dog", true), None);
-    assert_eq!(options_problem(" , ", true).as_deref(), Some("Enter at least one hint, or untick \"Use only the hints\"."));
+    assert_eq!(
+        options_problem(" , ", true).as_deref(),
+        Some("Enter at least one hint, or untick \"Use only the hints\".")
+    );
     assert_eq!(
         options_problem("cat, egret => Wildlife > Bird", false).as_deref(),
         Some("Hints can't map to nested keywords: remove \"=>\" from \"egret => Wildlife > Bird\". Put mappings in a label set file instead.")
@@ -354,7 +365,10 @@ fn writes_the_options_chosen() {
     let mut out = Vec::new();
     write_options_result(&mut out, Outcome::Ok, Some(&choice), None).unwrap();
     let text = String::from_utf8(out).unwrap();
-    assert_eq!(&text.lines().collect::<Vec<_>>()[1..], ["RESULT\tok", "LABELSET\tFashion", "HINTS\ta,\\nb", "ONLYHINTS\t0"]);
+    assert_eq!(
+        &text.lines().collect::<Vec<_>>()[1..],
+        ["RESULT\tok", "LABELSET\tFashion", "HINTS\ta,\\nb", "ONLYHINTS\t0"]
+    );
     let mut out = Vec::new();
     write_options_result(&mut out, Outcome::Cancel, None, None).unwrap();
     assert_eq!(&String::from_utf8(out).unwrap().lines().collect::<Vec<_>>()[1..], ["RESULT\tcancel"]);
@@ -363,7 +377,13 @@ fn writes_the_options_chosen() {
 #[test]
 fn dialog_centred_at_its_size() {
     let work = Rect { x: 0, y: 0, w: 2560, h: 1400 };
-    assert_eq!(center_window(Rect { x: 0, y: 0, w: 2560, h: 1400 }, work, (560, 300)), Rect { x: 1000, y: 550, w: 560, h: 300 });
+    assert_eq!(
+        center_window(Rect { x: 0, y: 0, w: 2560, h: 1400 }, work, (560, 300)),
+        Rect { x: 1000, y: 550, w: 560, h: 300 }
+    );
     // Over a Lightroom window near the edge: kept on screen.
-    assert_eq!(center_window(Rect { x: 2400, y: 0, w: 400, h: 300 }, work, (560, 300)), Rect { x: 2000, y: 0, w: 560, h: 300 });
+    assert_eq!(
+        center_window(Rect { x: 2400, y: 0, w: 400, h: 300 }, work, (560, 300)),
+        Rect { x: 2000, y: 0, w: 560, h: 300 }
+    );
 }

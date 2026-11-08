@@ -87,7 +87,11 @@ pub struct ThumbLoader {
 impl ThumbLoader {
     /// Starts the worker threads. `on_loaded` is called on a worker thread for each finished job.
     pub fn new(on_loaded: impl Fn(Loaded) + Send + Sync + 'static) -> Self {
-        let shared = Arc::new(Shared { jobs: Mutex::new(Vec::new()), ready: Condvar::new(), watched: Mutex::new(HashMap::new()) });
+        let shared = Arc::new(Shared {
+            jobs: Mutex::new(Vec::new()),
+            ready: Condvar::new(),
+            watched: Mutex::new(HashMap::new()),
+        });
         let on_loaded = Arc::new(on_loaded);
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 4);
         for _ in 0..workers {

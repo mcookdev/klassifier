@@ -87,6 +87,7 @@ mod imp {
 
     use crate::ui_model::Rect;
     use windows::core::BOOL;
+    use windows::core::{w, PCSTR};
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromRect, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST,
@@ -95,12 +96,11 @@ mod imp {
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
-    use windows::core::{w, PCSTR};
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
     use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-        GW_OWNER,
+        EnumWindows, GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, GW_OWNER,
     };
 
     pub fn dark_menus() {
@@ -108,10 +108,9 @@ mod imp {
         unsafe {
             let Ok(uxtheme) = LoadLibraryExW(w!("uxtheme.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) else { return };
             // By ordinal: these functions have no exported names.
-            let (Some(set_mode), Some(flush)) = (
-                GetProcAddress(uxtheme, PCSTR(135 as *const u8)),
-                GetProcAddress(uxtheme, PCSTR(136 as *const u8)),
-            ) else {
+            let (Some(set_mode), Some(flush)) =
+                (GetProcAddress(uxtheme, PCSTR(135 as *const u8)), GetProcAddress(uxtheme, PCSTR(136 as *const u8)))
+            else {
                 return;
             };
             let set_mode: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(set_mode);
@@ -185,7 +184,8 @@ mod imp {
     fn processes() -> Option<HashMap<u32, (u32, String)>> {
         unsafe {
             let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
-            let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+            let mut entry =
+                PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
             let mut map = HashMap::new();
             let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
             while more {

@@ -87,15 +87,11 @@ pub fn init_runtime(dir: &Path) -> Result<Environment> {
     let directml = dir.join("DirectML.dll");
     if directml.is_file() {
         // Load ours before ONNX Runtime asks for it, so an older copy in System32 isn't used.
-        ort::util::preload_dylib(&directml)
-            .map_err(|e| anyhow!("cannot load {}: {e}", directml.display()))?;
+        ort::util::preload_dylib(&directml).map_err(|e| anyhow!("cannot load {}: {e}", directml.display()))?;
     }
     let library = dir.join(ORT_LIBRARY);
     ensure!(library.is_file(), "{} not found (run `make fetch` and `make deploy`)", library.display());
-    ort::init_from(&library)
-        .map_err(|e| anyhow!("cannot load {}: {e}", library.display()))?
-        .build()
-        .map_err(ort_error)
+    ort::init_from(&library).map_err(|e| anyhow!("cannot load {}: {e}", library.display()))?.build().map_err(ort_error)
 }
 
 /// One label's result for a photo.
@@ -151,7 +147,13 @@ pub struct Classifier {
 
 impl Classifier {
     /// Loads the vision model and the label embeddings (from `cache_dir` when possible).
-    pub fn new(env: &Environment, files: &ModelFiles, labels: Vec<String>, cache_dir: &Path, use_gpu: bool) -> Result<Self> {
+    pub fn new(
+        env: &Environment,
+        files: &ModelFiles,
+        labels: Vec<String>,
+        cache_dir: &Path,
+        use_gpu: bool,
+    ) -> Result<Self> {
         ensure!(!labels.is_empty(), "no labels to classify with");
         let (vision, backend) = open_session(env, &files.vision, use_gpu)?;
         check_io(&vision, "pixel_values")?;
@@ -195,10 +197,8 @@ impl Classifier {
             .vision
             .run(ort::inputs!["pixel_values" => TensorRef::from_array_view(pixels.view()).map_err(ort_error)?])
             .map_err(ort_error)?;
-        let embedding = outputs["pooler_output"]
-            .try_extract_array::<f32>()
-            .map_err(ort_error)?
-            .into_dimensionality::<Ix2>()?;
+        let embedding =
+            outputs["pooler_output"].try_extract_array::<f32>().map_err(ort_error)?.into_dimensionality::<Ix2>()?;
         let embedding = normalized(embedding.row(0));
 
         let logits: Vec<f32> =
@@ -248,8 +248,7 @@ pub fn read_labels(paths: &[PathBuf]) -> Result<LabelSet> {
     let mut set = LabelSet::default();
     let mut seen: Vec<String> = Vec::new();
     for path in paths {
-        let text =
-            fs::read_to_string(path).with_context(|| format!("cannot read labels file {}", path.display()))?;
+        let text = fs::read_to_string(path).with_context(|| format!("cannot read labels file {}", path.display()))?;
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
         for (index, line) in text.lines().map(str::trim).enumerate() {
             if line.is_empty() || line.starts_with('#') {
@@ -276,7 +275,11 @@ pub fn read_labels(paths: &[PathBuf]) -> Result<LabelSet> {
             set.labels.push(label.to_string());
         }
     }
-    ensure!(!set.labels.is_empty(), "no labels in {}", paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
+    ensure!(
+        !set.labels.is_empty(),
+        "no labels in {}",
+        paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+    );
     Ok(set)
 }
 
@@ -288,7 +291,10 @@ fn parse_label_line(line: &str) -> Result<(&str, Option<Vec<String>>)> {
     let label = label.trim();
     ensure!(!label.is_empty(), "no label before \"=>\" in \"{line}\"");
     let parts: Vec<String> = keyword.split('>').map(|p| p.trim().to_string()).collect();
-    ensure!(parts.iter().all(|p| !p.is_empty()), "empty keyword name after \"=>\" in \"{line}\" (expected e.g. \"Wildlife > Bird\")");
+    ensure!(
+        parts.iter().all(|p| !p.is_empty()),
+        "empty keyword name after \"=>\" in \"{line}\" (expected e.g. \"Wildlife > Bird\")"
+    );
     Ok((label, Some(parts)))
 }
 
@@ -296,11 +302,7 @@ fn parse_label_line(line: &str) -> Result<(&str, Option<Vec<String>>)> {
 /// punctuation removed, which its Hugging Face tokenizer does but `tokenizer.json` doesn't.
 pub fn prompt(label: &str) -> String {
     let text = format!("a photo of {label}.");
-    let text: String = text
-        .chars()
-        .filter(|c| !c.is_ascii_punctuation())
-        .flat_map(char::to_lowercase)
-        .collect();
+    let text: String = text.chars().filter(|c| !c.is_ascii_punctuation()).flat_map(char::to_lowercase).collect();
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -353,10 +355,8 @@ fn embed_labels(env: &Environment, files: &ModelFiles, labels: &[String], use_gp
         let outputs = text_model
             .run(ort::inputs!["input_ids" => TensorRef::from_array_view(ids.view()).map_err(ort_error)?])
             .map_err(ort_error)?;
-        let embeddings = outputs["pooler_output"]
-            .try_extract_array::<f32>()
-            .map_err(ort_error)?
-            .into_dimensionality::<Ix2>()?;
+        let embeddings =
+            outputs["pooler_output"].try_extract_array::<f32>().map_err(ort_error)?.into_dimensionality::<Ix2>()?;
         dim = embeddings.ncols();
         for row in embeddings.rows() {
             rows.extend(normalized(row));
@@ -405,7 +405,8 @@ fn high_performance_gpu_name() -> Option<String> {
     // SAFETY: plain DXGI calls; the COM wrappers release the objects when dropped.
     let desc = unsafe {
         let factory: IDXGIFactory6 = CreateDXGIFactory1().ok()?;
-        let adapter: IDXGIAdapter1 = factory.EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE).ok()?;
+        let adapter: IDXGIAdapter1 =
+            factory.EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE).ok()?;
         adapter.GetDesc1().ok()?
     };
     let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
@@ -570,7 +571,10 @@ mod tests {
 
         // Same labels, so the same prompts, scores and embedding cache.
         assert_eq!(mapped.labels, plain.labels);
-        assert_eq!(mapped.labels.iter().map(|l| prompt(l)).collect::<Vec<_>>(), plain.labels.iter().map(|l| prompt(l)).collect::<Vec<_>>());
+        assert_eq!(
+            mapped.labels.iter().map(|l| prompt(l)).collect::<Vec<_>>(),
+            plain.labels.iter().map(|l| prompt(l)).collect::<Vec<_>>()
+        );
         fs::write(dir.join("text_model.onnx"), "t").unwrap();
         fs::write(dir.join("tokenizer.json"), "tok").unwrap();
         let files = ModelFiles::in_dir(&dir);
@@ -586,7 +590,12 @@ mod tests {
 
     #[test]
     fn bad_keyword_mappings_are_errors_with_the_line() {
-        for (line, wanted) in [("=> Wildlife", "no label"), ("bird =>", "empty keyword"), ("bird => Wildlife >> Bird", "empty keyword"), ("bird => > Bird", "empty keyword")] {
+        for (line, wanted) in [
+            ("=> Wildlife", "no label"),
+            ("bird =>", "empty keyword"),
+            ("bird => Wildlife >> Bird", "empty keyword"),
+            ("bird => > Bird", "empty keyword"),
+        ] {
             let dir = scratch("bad-mapping-test");
             let file = dir.join("set.txt");
             fs::write(&file, format!("dog\n{line}\n")).unwrap();

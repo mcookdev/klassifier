@@ -402,7 +402,8 @@ fn show_options(input: OptionsInput, screenshot_png: Option<&Path>) -> Result<()
                 return;
             }
             let label_set = sets.get(ui.get_set_index().max(0) as usize).unwrap_or(&sets[0]).clone();
-            *c.borrow_mut() = (Outcome::Ok, Some(OptionsChoice { label_set, hints, only_hints }), win::geometry(ui.window()));
+            *c.borrow_mut() =
+                (Outcome::Ok, Some(OptionsChoice { label_set, hints, only_hints }), win::geometry(ui.window()));
             let _ = ui.hide();
         });
         let (weak, c) = (ui.as_weak(), closed.clone());
@@ -444,8 +445,8 @@ fn screenshot<T: ComponentHandle>(
     frame: impl Fn(&T),
 ) -> Result<()> {
     use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
-    use slint::Rgb8Pixel;
     use slint::platform::{Platform, WindowAdapter};
+    use slint::Rgb8Pixel;
 
     struct Offscreen(Rc<MinimalSoftwareWindow>);
     impl Platform for Offscreen {

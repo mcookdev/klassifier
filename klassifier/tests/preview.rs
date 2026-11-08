@@ -131,13 +131,17 @@ fn cli_reports_each_listed_path() {
     let list = tmp.join("list.txt");
     fs::write(&list, format!("\u{feff}{}\r\n{}\r\n\r\n", small.display(), missing.display())).unwrap();
 
-    let out = Command::new(env!("CARGO_BIN_EXE_klassifier")).arg("--no-classify").arg("--list").arg(&list).output().unwrap();
+    let out =
+        Command::new(env!("CARGO_BIN_EXE_klassifier")).arg("--no-classify").arg("--list").arg(&list).output().unwrap();
     assert!(out.status.success(), "exit {:?}: {}", out.status, String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
 
     assert!(lines[0].starts_with("#klassifier\t"), "{stdout}");
-    assert_eq!(lines[1], format!("OK\t{}\tfile\t100\t50\t0\t{}\tsmall", small.display(), lines[1].split('\t').nth(6).unwrap()));
+    assert_eq!(
+        lines[1],
+        format!("OK\t{}\tfile\t100\t50\t0\t{}\tsmall", small.display(), lines[1].split('\t').nth(6).unwrap())
+    );
     assert!(lines[2].starts_with(&format!("ERR\t{}\tcannot open file", missing.display())), "{stdout}");
     assert!(lines[3].starts_with("#summary\tok=1\terr=1\t"), "{stdout}");
     assert_eq!(lines.len(), 4, "{stdout}");
@@ -163,7 +167,8 @@ fn cli_writes_numbered_thumbnails() {
         .unwrap();
     assert!(out.status.success(), "exit {:?}: {}", out.status, String::from_utf8_lossy(&out.stderr));
 
-    let mut names: Vec<String> = fs::read_dir(&thumbs).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    let mut names: Vec<String> =
+        fs::read_dir(&thumbs).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
     assert_eq!(names, ["101.jpg", "103.jpg"]);
     let first = image::open(thumbs.join("101.jpg")).unwrap();

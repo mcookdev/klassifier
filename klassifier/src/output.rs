@@ -99,11 +99,7 @@ pub fn ok_row(
 
 /// `label=0.9100;label=0.6400`, with the separators removed from labels.
 fn labels_field(labels: &[LabelScore], value: impl Fn(&LabelScore) -> f32) -> String {
-    labels
-        .iter()
-        .map(|l| format!("{}={:.4}", label_name(&l.label), value(l)))
-        .collect::<Vec<_>>()
-        .join(";")
+    labels.iter().map(|l| format!("{}={:.4}", label_name(&l.label), value(l))).collect::<Vec<_>>().join(";")
 }
 
 /// A label as it appears in the label fields, without the field and list separators.
