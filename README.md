@@ -18,16 +18,16 @@ card), it uses the one Windows ranks as high-performance, normally the
 graphics card. `Klassifier.log` names it (`backend=DirectML gpu=NVIDIA GeForce
 RTX 4090`), and so does the report shown when no photo could be classified.
 
-For RAW files the app uses the JPEG preview embedded in the file and never
-decodes the raw data. JPEG, PNG, TIFF and WebP files are read directly. Other
-formats (HEIC, PSD, ...) are reported as unsupported. Images are rotated
-upright using their EXIF orientation.
+For RAW files the model sees the camera's embedded JPEG preview, not your
+Lightroom edits (see [How RAW files are read](#how-raw-files-are-read)).
 
 ## Requirements
 
 - Adobe Lightroom Classic (SDK 6.0 or later) on Windows
 - WSL with Rust (`cargo`), `make`, `curl`, `python3` and `rsync` for building
   (the last three are usually preinstalled on Ubuntu)
+- Only to change the app icon: `pip install resvg-py pillow` (see
+  [The app icon](#the-app-icon))
 
 ## Building
 
@@ -48,24 +48,35 @@ This gets ONNX Runtime 1.24.4 and DirectML 1.15.4 from NuGet, and the SigLIP
 model (`Xenova/siglip-base-patch16-224`, ONNX export) from Hugging Face.
 `make deploy` runs it too, and it skips files that are already downloaded.
 
+Each deploy needs a new version, so bump it first:
+
+```bash
+make bump              # bug fixes, docs, build tooling: 2.9.3 -> 2.9.4
+make bump PART=minor   # new features: 2.9.3 -> 2.10.0
+make bump PART=major   # breaking changes: 2.9.3 -> 3.0.0
+```
+
+This sets the version in `Info.lua` and `Cargo.toml` and adds 1 to `build`. `make deploy`
+stops unless the two files agree and both the version and `build` are newer than the
+deployed ones (see [CLAUDE.md](CLAUDE.md)).
+
 Build and deploy:
 
 ```bash
 make deploy
 ```
 
-Or press **Ctrl+Shift+B** in VS Code. This cross-compiles `klassifier.exe` and
-`klassifier-ui.exe` and copies the plugin folder, the exes and the runtime files to
-`C:\Users\cadre\lr-plugins\Klassifier.lrplugin`. Only changed files are
-copied, so the model is copied once. To deploy somewhere else:
+Or press **Ctrl+Shift+B** in VS Code. This checks the Lua syntax, runs clippy on the
+Windows build with warnings as errors (`make clippy-windows`, so a lint stops the
+deploy), cross-compiles `klassifier.exe` and `klassifier-ui.exe`, and copies the
+plugin folder, the exes and the runtime files to the deploy folder. That's
+`C:\Users\cadre\lr-plugins\Klassifier.lrplugin` by default, the path used in the
+rest of this README. Only changed files are copied, so the model is copied once.
+To deploy somewhere else:
 
 ```bash
 make deploy DEPLOY_DIR=/mnt/c/somewhere
 ```
-
-Each deploy needs a new version: `make deploy` stops unless the version in `Info.lua`
-matches `Cargo.toml` and is newer than the deployed one, with a higher `build` and
-semver version (see [CLAUDE.md](CLAUDE.md)).
 
 To try the review window without Lightroom:
 
@@ -77,34 +88,6 @@ This opens it on Windows with the photos in `test-data/` (repeated up to 500,
 `DEMO_COUNT=...` to change) and made-up labels. Its buttons just close it.
 `make ui-demo DEMO_ARGS="--screenshot shot.png"` saves a picture of the window
 instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
-
-## Testing
-
-```bash
-make test
-```
-
-This first checks the plugin's Lua syntax with `luac5.1` (`make lint`, also run by
-`make deploy`). Lightroom runs Lua 5.1, so use that version: newer ones accept
-syntax Lightroom rejects. Install it with `sudo apt install lua5.1`. Without it,
-the check is skipped with a note. It catches syntax errors only, not misspelled
-names or wrong SDK calls.
-
-It then runs the app's tests natively on Linux. They cover reading previews and
-the review window's data (what it reads from and returns to the plugin, and the
-texts it shows), not the classifier, because ONNX Runtime is only deployed for
-Windows, nor the window itself, which is built without its UI so no extra Linux
-libraries are needed. The tests that use real photos
-read `test-data/manifest.tsv` at the repo root and are skipped if it's
-missing. `test-data/` is gitignored because it holds personal photos. Each
-manifest line is tab-separated:
-
-```
-<file name><TAB><source><TAB><min long edge><TAB>portrait|landscape
-```
-
-where `source` is the value the app reports (`file`, `preview`, `full` or
-`thumbnail`). Lines starting with `#` are comments.
 
 ## Installation
 
@@ -126,6 +109,10 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   is selected, Lightroom targets the whole filmstrip, so check the count.
   Above 500 photos the dialog warns that it can take a while. Esc cancels. It
   opens centred over Lightroom, or where you last moved it.
+- Lightroom stays usable while the dialog is open. If the selection changes
+  meanwhile, clicking **Classify** asks whether to classify the photos the
+  dialog counted. To classify the new selection, cancel and run Classify Photos
+  again.
 - Videos are skipped. Virtual copies that share a file with another targeted
   photo are processed only once, and share its suggestions.
 - Photos go to `klassifier.exe` 100 at a time, with a progress bar. Cancel
@@ -143,6 +130,8 @@ where `source` is the value the app reports (`file`, `preview`, `full` or
   crops. For photos Lightroom has no previews of yet, rendering takes it about
   0.4 s each, so the grid first shows the image the app read (for RAW files,
   the camera's embedded preview) and swaps in Lightroom's as it arrives.
+  Lightroom's rendering is only for display: the model always classifies the
+  image the app read.
 - The panel on the right shows the selected photo larger, with all its
   labels: the suggested ones are ticked and in bold, and a label mapped to a
   nested keyword shows where it goes ("bird (Wildlife > Bird)"). Click a photo
@@ -317,7 +306,7 @@ The output is tab-separated, one line per photo (format documented in
 `klassifier/src/output.rs`):
 
 ```
-#klassifier	2.4.0	backend=DirectML	gpu=NVIDIA GeForce RTX 4090
+#klassifier	2.9.16	backend=DirectML	gpu=NVIDIA GeForce RTX 4090
 #model	load_ms=520	labels=98	label_cache=hit
 OK	D:\Photos\DSC09840.dng	preview	683	1024	270	22		Forest=0.1589;Tree=0.1422;Landscape=0.0235;River=0.0147;Lake=0.0074	Forest=0.4512;Tree=0.3628;Landscape=0.0681;River=0.0418;Lake=0.0306	strong	Forest;Tree;Landscape;River	
 ERR	D:\Photos\IMG_0001.HEIC	unsupported: .heic
@@ -343,6 +332,48 @@ Plug-in Manager's log file link.
 
 Open **File > Plug-in Manager**, select "Klassifier", and click
 **Remove**. You can then delete `C:\Users\cadre\lr-plugins\Klassifier.lrplugin`.
+
+## Testing
+
+```bash
+make test
+```
+
+This first checks the plugin's Lua syntax with `luac5.1` (`make lint`, also run by
+`make deploy`). Lightroom runs Lua 5.1, so use that version: newer ones accept
+syntax Lightroom rejects. Install it with `sudo apt install lua5.1`. Without it,
+the check is skipped with a note. It catches syntax errors only, not misspelled
+names or wrong SDK calls.
+
+Next it checks the Rust formatting (`cargo fmt --check`; run `cargo fmt` in
+`klassifier/` to fix it) and runs clippy with warnings as errors. Either one
+failing fails `make test`. This clippy pass is the Linux build, which leaves out
+the review window and the Windows-only code. `make clippy-windows` (run by
+`make deploy`) checks those.
+
+Then it runs the app's tests natively on Linux. They cover reading previews and
+the review window's data (what it reads from and returns to the plugin, and the
+texts it shows), not the classifier, because ONNX Runtime is only deployed for
+Windows, nor the window itself, which is built without its UI so no extra Linux
+libraries are needed. The tests that use real photos
+read `test-data/manifest.tsv` at the repo root and are skipped if it's
+missing. `test-data/` is gitignored because it holds personal photos. Each
+manifest line is tab-separated:
+
+```
+<file name><TAB><source><TAB><min long edge><TAB>portrait|landscape
+```
+
+where `source` is the value the app reports (`file`, `preview`, `full` or
+`thumbnail`). Lines starting with `#` are comments.
+
+## The app icon
+
+The exes' icon (Explorer, the taskbar) and the windows' icon come from
+`klassifier/assets/klassifier.svg`. After editing it, run
+`python3 tools/make-icons.py` (needs `pip install resvg-py pillow`) to remake
+`klassifier.ico` and `klassifier.png` next to it, and commit all three. The
+build embeds the `.ico`, so building doesn't need Python.
 
 ## License
 
