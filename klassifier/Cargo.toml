@@ -1,6 +1,6 @@
 [package]
 name = "klassifier"
-version = "2.9.13"
+version = "2.9.14"
 edition = "2021"
 license = "MIT"
 
