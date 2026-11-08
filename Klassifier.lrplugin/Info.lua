@@ -7,7 +7,7 @@ return {
 	LrSdkVersion = 6.0,
 	LrSdkMinimumVersion = 6.0,
 
-	LrToolkitIdentifier = 'com.example.lightroom.klassifier',
+	LrToolkitIdentifier = 'io.github.mcookdev.klassifier',
 	LrPluginName = "Klassifier",
 	LrPluginInfoUrl = "https://www.example.com",
 
@@ -27,5 +27,5 @@ return {
 		},
 	},
 
-	VERSION = { major = 2, minor = 14, revision = 3, build = 60 },
+	VERSION = { major = 3, minor = 0, revision = 0, build = 61 },
 }

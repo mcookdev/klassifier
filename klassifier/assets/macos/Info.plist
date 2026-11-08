@@ -8,7 +8,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Klassifier</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.example.lightroom.klassifier.ui</string>
+	<string>io.github.mcookdev.klassifier.ui</string>
 	<key>CFBundleExecutable</key>
 	<string>klassifier-ui</string>
 	<key>CFBundleIconFile</key>
