@@ -87,8 +87,9 @@ function Review.copyNote(item)
 end
 
 -- The review window's input lines for `items` (ui_model.rs describes them). `notes` is as for
--- Review.show. `saveFiles` are the requests and answers files for Save Keywords.
-local function inputLines(items, notes, saveFiles)
+-- Review.show. `saveFiles` are the requests and answers files for Save Keywords, `aliveFile`
+-- the file keepAlive rewrites.
+local function inputLines(items, notes, saveFiles, aliveFile)
 	local lines = { '#klassifier-ui\treview\t1' }
 	Exec.addSavedWindow(lines, 'reviewWindow')
 	if notes.report then
@@ -100,6 +101,7 @@ local function inputLines(items, notes, saveFiles)
 		lines[#lines + 1] = 'NOTES\t' .. Exec.escape(notes.before .. notes.failed .. notes.after)
 	end
 	lines[#lines + 1] = 'SAVEFILES\t' .. Exec.clean(saveFiles.requests) .. '\t' .. Exec.clean(saveFiles.answers)
+	lines[#lines + 1] = 'ALIVE\t' .. Exec.clean(aliveFile)
 	for n, item in ipairs(items) do
 		local set = item.chosen or item.suggested
 		lines[#lines + 1] = table.concat({
@@ -225,6 +227,36 @@ local function watchSaves(files, items, saveItem)
 	end
 end
 
+-- Rewrites `file` every second until stopped, so the review window can tell that Lightroom is
+-- still there: it stops saving once the file goes stale. Writes it right away, so it exists
+-- before the window starts. Its own task, so a slow save can't hold it up. Returns a function
+-- that stops it.
+local function keepAlive(file)
+	local stopped, done, warned = false, false, false
+	local function touch()
+		local f = io.open(file, 'wb')
+		if f then
+			f:write('alive')
+			f:close()
+		elseif not warned then
+			warned = true
+			logger:error('Could not write ' .. file)
+		end
+	end
+	touch()
+	LrTasks.startAsyncTask(function()
+		while not stopped do
+			LrTasks.sleep(1)
+			if not stopped then touch() end
+		end
+		done = true
+	end)
+	return function()
+		stopped = true
+		while not done do LrTasks.sleep(0.05) end
+	end
+end
+
 -- Shows the review window for `items` (at least one). `notes` is the extra header text (label
 -- set, skipped files, cancel): `before .. failed .. after`, where `failed` ("2 failed") links to
 -- `report` ({ summary, lines }, as for showReport) if there is one. `saveItem(item)` writes one
@@ -233,19 +265,23 @@ end
 function Review.show(context, items, notes, saveItem)
 	local inFile = Exec.tempFile('klassifier-review.txt')
 	local saveFiles = { requests = Exec.tempFile('klassifier-save.txt'), answers = Exec.tempFile('klassifier-saved.txt') }
+	local aliveFile = Exec.tempFile('klassifier-alive.txt')
 	context:addCleanupHandler(function()
 		LrFileUtils.delete(inFile)
 		LrFileUtils.delete(saveFiles.requests)
 		LrFileUtils.delete(saveFiles.answers)
+		LrFileUtils.delete(aliveFile)
 	end)
-	local ok, err = Exec.writeLines(inFile, inputLines(items, notes, saveFiles))
+	local ok, err = Exec.writeLines(inFile, inputLines(items, notes, saveFiles, aliveFile))
 	if not ok then
 		LrDialogs.message('Review keywords', 'Could not write ' .. inFile .. ': ' .. tostring(err), 'critical')
 		return 'cancel'
 	end
+	local stopAlive = keepAlive(aliveFile)
 	local stopSaving = watchSaves(saveFiles, items, saveItem)
 	local output, runErr = Exec.run('klassifier-ui.exe', string.format('--review --in "%s"', inFile))
 	stopSaving()
+	stopAlive()
 	if output then Exec.saveWindow(output, 'reviewWindow') end
 	local result = output and readResult(output, items)
 	if not result then

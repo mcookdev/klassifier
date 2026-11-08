@@ -20,7 +20,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{bail, Context, Result};
 use slint::platform::Key;
@@ -47,6 +47,8 @@ Usage: klassifier-ui --options --in <file>
 
 /// How often the answers file is checked while a Save Keywords waits for the plugin.
 const ANSWER_INTERVAL: Duration = Duration::from_millis(150);
+/// How often a waiting Save Keywords checks that Lightroom is still there.
+const ALIVE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Screenshot size, in pixels at scale 1.
 const SCREENSHOT_SIZE: (u32, u32) = (1200, 800);
@@ -251,6 +253,11 @@ enum Saver {
     Instant,
 }
 
+/// Whether Lightroom has gone, going by its ALIVE file (see `ui_model`); never without one.
+fn gone_check(alive: Option<PathBuf>) -> impl Fn() -> bool + Clone + 'static {
+    move || alive.as_deref().is_some_and(|file| ui_model::lightroom_gone(file, SystemTime::now()))
+}
+
 /// The review window, its items, how it closed and its report window (see build).
 type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>, OpenReport);
 
@@ -258,6 +265,7 @@ type Built = (ReviewWindow, Rc<RefCell<Vec<Item>>>, Rc<StdCell<Closed>>, OpenRep
 /// images on worker threads (false for screenshots, which have no event loop to deliver them).
 fn build(input: ReviewInput, select: usize, saver: Saver, threaded: bool) -> Result<Built> {
     let ui = ReviewWindow::new()?;
+    let gone = gone_check(input.alive.clone());
     ui.set_version(env!("CARGO_PKG_VERSION").into());
     ui.set_can_save_keywords(!matches!(saver, Saver::None));
     let items = Rc::new(RefCell::new(input.items));
@@ -288,8 +296,14 @@ fn build(input: ReviewInput, select: usize, saver: Saver, threaded: bool) -> Res
             }
         }
     };
-    ui.on_save_all(finish(Outcome::Accept));
+    // Without Lightroom nothing would read the result: say so instead.
+    let (weak, g, save_all) = (ui.as_weak(), gone.clone(), finish(Outcome::Accept));
+    ui.on_save_all(move || match weak.upgrade() {
+        Some(ui) if g() => ui.set_lightroom_gone(true),
+        _ => save_all(),
+    });
     ui.on_cancel(finish(Outcome::Cancel));
+    ui.on_close_gone(finish(Outcome::Cancel));
 
     let weak = ui.as_weak();
     let m = model.clone();
@@ -323,12 +337,16 @@ fn build(input: ReviewInput, select: usize, saver: Saver, threaded: bool) -> Res
     ui.on_save_keywords(move || {
         let Some(ui) = weak.upgrade() else { return };
         let index = ui.get_selected() as usize;
+        if !its.borrow()[index].can_save() {
+            return;
+        }
+        if gone() {
+            ui.set_lightroom_gone(true);
+            return;
+        }
         {
             let mut items = its.borrow_mut();
             let item = &mut items[index];
-            if !item.can_save() {
-                return;
-            }
             item.save = match &saver {
                 Saver::None => return,
                 Saver::Instant => Save::Saved,
@@ -373,15 +391,28 @@ fn show_totals(ui: &ReviewWindow, items: &[Item]) {
 }
 
 /// Checks the answers file for the plugin's answers to Save Keywords while any is waiting, and
-/// shows them. The timer runs until it is dropped.
-fn watch_answers(ui: &ReviewWindow, items: Rc<RefCell<Vec<Item>>>, files: SaveFiles) -> slint::Timer {
+/// shows them; says so if Lightroom goes (`gone`) before answering. The timer runs until it is
+/// dropped.
+fn watch_answers(
+    ui: &ReviewWindow,
+    items: Rc<RefCell<Vec<Item>>>,
+    files: SaveFiles,
+    gone: impl Fn() -> bool + 'static,
+) -> slint::Timer {
     let timer = slint::Timer::default();
     let mut reader = LineReader::default();
+    let mut checked = Instant::now();
     let weak = ui.as_weak();
     timer.start(slint::TimerMode::Repeated, ANSWER_INTERVAL, move || {
         let Some(ui) = weak.upgrade() else { return };
         if !items.borrow().iter().any(|item| item.save == Save::Saving) {
             return;
+        }
+        if !ui.get_lightroom_gone() && checked.elapsed() >= ALIVE_INTERVAL {
+            checked = Instant::now();
+            if gone() {
+                ui.set_lightroom_gone(true);
+            }
         }
         // Unreadable for now (the plugin writing it): try again next time.
         let Ok(lines) = reader.read_new(&files.answers) else { return };
@@ -440,15 +471,17 @@ fn label_key(text: &str) -> Option<usize> {
 /// anything was changed.
 fn review(input: ReviewInput, select: usize, saver: Saver) -> Result<(Closed, Vec<Item>)> {
     let saved = input.window;
+    let gone = gone_check(input.alive.clone());
     let files = match &saver {
         Saver::Files(files) => Some(files.clone()),
         _ => None,
     };
     let (ui, items, closed, report) = build(input, select, saver, true)?;
-    let _answers = files.map(|files| watch_answers(&ui, items.clone(), files));
+    let _answers = files.map(|files| watch_answers(&ui, items.clone(), files, gone));
     let (weak, c) = (ui.as_weak(), closed.clone());
     ui.window().on_close_requested(move || match weak.upgrade() {
-        Some(ui) if ui.get_edited_count() > 0 => {
+        // Once Lightroom has gone there is nothing to keep: close without asking.
+        Some(ui) if ui.get_edited_count() > 0 && !ui.get_lightroom_gone() => {
             ui.invoke_request_cancel();
             CloseRequestResponse::KeepWindowShown
         }
@@ -515,6 +548,7 @@ fn demo_input(dir: &Path, count: usize) -> Result<ReviewInput> {
         items,
         window: None,
         save_files: None,
+        alive: None,
     })
 }
 

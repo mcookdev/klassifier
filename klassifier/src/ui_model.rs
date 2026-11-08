@@ -10,6 +10,7 @@
 //! REPORT<TAB><summary, escaped as NOTES>                                (optional: the link's report)
 //! LINE<TAB><text>                                                      (one per report line, as for --report)
 //! SAVEFILES<TAB><requests file><TAB><answers file>                     (optional: Save Keywords)
+//! ALIVE<TAB><file>                                                     (optional: see below)
 //! ITEM<TAB><n><TAB><name><TAB><copy note><TAB><photo count><TAB><edited 0|1><TAB><stand-in thumbnail><TAB><Lightroom thumbnail><TAB><saved 0|1>
 //! LABEL<TAB><n><TAB><label><TAB><suggested 0|1><TAB><chosen 0|1><TAB><keyword "Parent > Child", or empty>
 //! ```
@@ -35,6 +36,10 @@
 //!
 //! Neither file has to exist yet, and a line only counts once its line break is written.
 //! Without SAVEFILES the window has no Save Keywords.
+//!
+//! The plugin rewrites the ALIVE file every second while the window is open. If it is missing,
+//! or older than [`ALIVE_TIMEOUT`], Lightroom has gone: nothing would read a save, so the window
+//! says so instead of saving.
 //!
 //! Output, on stdout:
 //!
@@ -78,6 +83,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context, Result};
 
@@ -128,6 +134,8 @@ pub struct ReviewInput {
     pub items: Vec<Item>,
     pub window: Option<Geometry>,
     pub save_files: Option<SaveFiles>,
+    /// The file the plugin keeps fresh while Lightroom is there (see the module docs).
+    pub alive: Option<PathBuf>,
 }
 
 /// The files Save Keywords goes through (see the module docs).
@@ -276,6 +284,20 @@ pub fn append_line(file: &Path, line: &str) -> io::Result<()> {
     OpenOptions::new().create(true).append(true).open(file)?.write_all(format!("{line}\n").as_bytes())
 }
 
+/// How long the ALIVE file can go unchanged before Lightroom counts as gone. Generous, as
+/// Lightroom can pause its tasks while it writes to the catalog.
+pub const ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Whether Lightroom has gone at `now`, going by its ALIVE file: missing (the plugin cleaned
+/// up), unreadable, or not rewritten for more than [`ALIVE_TIMEOUT`]. A file changed after
+/// `now` (the clock went back) counts as fresh.
+pub fn lightroom_gone(alive: &Path, now: SystemTime) -> bool {
+    match fs::metadata(alive).and_then(|m| m.modified()) {
+        Ok(modified) => now.duration_since(modified).is_ok_and(|age| age > ALIVE_TIMEOUT),
+        Err(_) => true,
+    }
+}
+
 /// Reads the lines added to a file since the last call, as they are completed.
 #[derive(Debug, Default)]
 pub struct LineReader {
@@ -403,6 +425,10 @@ pub fn parse_review(text: &str) -> Result<ReviewInput> {
                 input.save_files =
                     Some(SaveFiles { requests: PathBuf::from(fields[1]), answers: PathBuf::from(fields[2]) });
             }
+            "ALIVE" => match fields.get(1) {
+                Some(file) if !file.is_empty() => input.alive = Some(PathBuf::from(file)),
+                _ => bail!("line {n}: ALIVE needs a file"),
+            },
             "ITEM" => {
                 if fields.len() < 8 {
                     bail!("line {n}: ITEM needs 8 fields, has {}", fields.len());

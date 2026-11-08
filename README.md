@@ -163,6 +163,10 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
 - **Cancel** (or Esc), or closing the window, adds nothing more: photos saved
   with Save Keywords keep their keywords. If you changed any photo you didn't
   save, it asks before throwing the changes away.
+- If Lightroom Classic has quit while the window is open, Save Keywords and
+  Save All say so instead of saving (nothing would receive the keywords), and
+  Close (or Enter or Esc) closes the window. It notices within about 10 seconds of
+  Lightroom quitting. Reopen Lightroom and run Classify Photos again.
 - If no photo could be classified, a report opens instead of the review
   window: how many failed or were unsupported or skipped, what it ran on, the
   label set, and each photo's error. The errors can be selected and copied

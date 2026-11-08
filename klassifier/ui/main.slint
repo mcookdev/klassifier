@@ -239,6 +239,9 @@ export component ReviewWindow inherits Window {
     in property <[PanelLabel]> panel-labels;
     in property <image> panel-image;
     in property <bool> panel-loaded;
+    // Lightroom has gone (see src/ui_model.rs), so nothing can be saved: covers the window
+    // with a message whose Close calls close-gone.
+    in property <bool> lightroom-gone;
 
     // Cells that fit across the list, the scrollbar excluded.
     out property <int> columns: max(1, floor((list.visible-width - Metrics.spacing) / (Metrics.cell-width + Metrics.spacing)));
@@ -257,9 +260,19 @@ export component ReviewWindow inherits Window {
     callback key(string) -> bool;
     // The notes link was clicked: show why photos failed.
     callback show-report();
+    // Close, after Lightroom has gone.
+    callback close-gone();
 
     changed columns => {
         root.columns-changed(root.columns);
+    }
+
+    changed lightroom-gone => {
+        if (root.lightroom-gone) {
+            confirm.close();
+            about.close();
+            keys.focus();
+        }
     }
 
     // Cancel, asking first if any photo was changed.
@@ -394,6 +407,13 @@ export component ReviewWindow inherits Window {
 
     keys := FocusScope {
         key-pressed(event) => {
+            // Only Close is left, and no key reaches the window behind it.
+            if (root.lightroom-gone) {
+                if (event.text == Key.Escape || event.text == Key.Return) {
+                    root.close-gone();
+                }
+                return accept;
+            }
             if (event.text == Key.Escape) {
                 root.request-cancel();
                 return accept;
@@ -566,6 +586,59 @@ export component ReviewWindow inherits Window {
                             color: #7a7a7a;
                             font-size: 10px;
                             wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.lightroom-gone: Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #000000a0;
+        // Swallows the clicks and scrolling meant for the window behind.
+        TouchArea {
+            scroll-event(event) => {
+                accept
+            }
+        }
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 420px;
+            height: gone-card.preferred-height;
+            background: #1e1e1e;
+            border-color: #555555;
+            border-width: 1px;
+            border-radius: 4px;
+            gone-card := VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                Text {
+                    text: "Lightroom Classic has closed";
+                    color: #e0e0e0;
+                    font-size: 14px;
+                    font-weight: 600;
+                }
+                Text {
+                    text: "Klassifier can't save keywords without Lightroom Classic. Close this window, then reopen Lightroom Classic and run Classify Photos again.";
+                    color: #d0d0d0;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.saved-count == 0 ? "No keywords were added." : "Photos you already saved keep their keywords.";
+                    color: #a0a0a0;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    padding-top: 4px;
+                    Button {
+                        text: "Close";
+                        primary: true;
+                        clicked => {
+                            root.close-gone();
                         }
                     }
                 }

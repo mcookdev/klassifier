@@ -2,12 +2,13 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
 use klassifier::ui_model::{
-    append_line, apply_answer, center_window, escape, grid_rows, move_selection, options_problem, parse_answer,
-    parse_hints, parse_options, parse_report, parse_review, place_window, restore_window, totals, totals_line,
-    unescape, write_options_result, write_result, Geometry, Item, Label, LineReader, Move, OptionsChoice, Outcome,
-    Rect, Save, SaveFiles,
+    append_line, apply_answer, center_window, escape, grid_rows, lightroom_gone, move_selection, options_problem,
+    parse_answer, parse_hints, parse_options, parse_report, parse_review, place_window, restore_window, totals,
+    totals_line, unescape, write_options_result, write_result, Geometry, Item, Label, LineReader, Move, OptionsChoice,
+    Outcome, Rect, Save, SaveFiles,
 };
 
 fn label(name: &str, suggested: bool) -> Label {
@@ -30,6 +31,7 @@ fn item(labels: Vec<Label>, photo_count: usize) -> Item {
 const SAMPLE: &str = "#klassifier-ui\treview\t1\n\
 NOTES\tLabels: General.\\nCancelled after 3 of 9 photos. C:\\\\x\n\
 SAVEFILES\tC:\\t\\save.txt\tC:\\t\\saved.txt\n\
+ALIVE\tC:\\t\\alive.txt\n\
 ITEM\t1\tDSC01.ARW\t+1 virtual copy\t2\t0\tC:\\t\\1.jpg\tC:\\t\\1.lr.jpg\n\
 LABEL\t1\tegret\t1\t0\tWildlife > Bird > Egret\n\
 LABEL\t1\theron\t0\t0\t\n\
@@ -62,7 +64,9 @@ fn parses_review_input() {
         input.save_files,
         Some(SaveFiles { requests: PathBuf::from("C:\\t\\save.txt"), answers: PathBuf::from("C:\\t\\saved.txt") })
     );
-    assert_eq!(parse_review("#klassifier-ui\treview\t1\n").unwrap().save_files, None);
+    assert_eq!(input.alive, Some(PathBuf::from("C:\\t\\alive.txt")));
+    let bare = parse_review("#klassifier-ui\treview\t1\n").unwrap();
+    assert_eq!((bare.save_files, bare.alive), (None, None));
 }
 
 /// "N failed" in the notes is a link to the errors, which follow as REPORT and LINE lines.
@@ -96,6 +100,8 @@ fn rejects_bad_input() {
     assert!(parse_review(&format!("{header}ITEM\t1\ta\n")).is_err(), "too few fields");
     assert!(parse_review(&format!("{header}ITEM\t1\ta\t\t1\t0\ts\tr\tno\n")).is_err(), "bad saved flag");
     assert!(parse_review(&format!("{header}SAVEFILES\tonly-one\n")).is_err(), "one save file");
+    assert!(parse_review(&format!("{header}ALIVE\n")).is_err(), "no alive file");
+    assert!(parse_review(&format!("{header}ALIVE\t\n")).is_err(), "empty alive file");
 }
 
 #[test]
@@ -512,5 +518,25 @@ fn line_reader_returns_complete_lines_once() {
     fs::write(&file, [fs::read(&file).unwrap(), b"lf\r\n".to_vec()].concat()).unwrap();
     assert_eq!(reader.read_new(&file).unwrap(), ["FAILED\t2\thalf"]);
     assert!(reader.read_new(&file).unwrap().is_empty());
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn lightroom_gone_once_the_alive_file_goes_stale() {
+    let dir = std::env::temp_dir().join(format!("klassifier-alive-test-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("alive.txt");
+    let _ = fs::remove_file(&file);
+    let now = SystemTime::now();
+    assert!(lightroom_gone(&file, now), "no file");
+    fs::write(&file, "alive").unwrap();
+    let at =
+        |modified: SystemTime| fs::File::options().write(true).open(&file).unwrap().set_modified(modified).unwrap();
+    at(now - Duration::from_secs(9));
+    assert!(!lightroom_gone(&file, now), "fresh enough");
+    at(now - Duration::from_secs(11));
+    assert!(lightroom_gone(&file, now), "stale");
+    at(now + Duration::from_secs(60));
+    assert!(!lightroom_gone(&file, now), "changed after now: the clock went back");
     fs::remove_dir_all(&dir).unwrap();
 }
