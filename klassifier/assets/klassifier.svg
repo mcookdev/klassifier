@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-labelledby="title">
+  <title id="title">Klassifier</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8CE4A"/>
+      <stop offset="1" stop-color="#EDB31C"/>
+    </linearGradient>
+
+    <!-- Cuts the hanging hole and the K out of the tag so the yellow shows through -->
+    <mask id="cut" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <circle cx="292" cy="512" r="32" fill="#000"/>
+      <g fill="none" stroke="#000" stroke-width="60" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M446 390V634"/>
+        <path d="M610 390L462 512L610 634"/>
+      </g>
+    </mask>
+  </defs>
+
+  <!-- Icon base -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+
+  <!-- Keyword tag with K -->
+  <polygon points="200,300 640,300 824,512 640,724 200,724"
+           fill="#2B2722" stroke="#2B2722" stroke-width="48" stroke-linejoin="round"
+           mask="url(#cut)"/>
+</svg>
