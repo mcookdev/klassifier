@@ -15,8 +15,8 @@ logger:enable('logfile')
 
 local Exec = {}
 
--- True while Classify Photos runs (see Klassifier.lua).
-Exec.running = false
+-- What Classify Photos is doing (see Klassifier.lua): nil when idle, else 'options', 'classifying', 'review' or 'report'.
+Exec.running = nil
 
 -- A new file name in the temp folder, based on `name`.
 function Exec.tempFile(name)

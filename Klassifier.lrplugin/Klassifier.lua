@@ -218,16 +218,38 @@ local function buildItems(entries, results, thumbs)
 	return items
 end
 
+-- What to tell the user when Classify Photos is clicked again, by what the first run is doing.
+local BUSY = {
+	options = 'The Classify Photos options window is already open. It may be behind Lightroom\'s window.',
+	classifying = 'Classify Photos is already running. You can cancel it from the progress bar.',
+	review = 'Classify Photos is already running: finish its review first. The review window may be behind Lightroom\'s window.',
+	report = 'Classify Photos is showing its report. Close it first.',
+}
+
+-- True when two `entries` lists from collectTargets cover the same files with the same number
+-- of photos each. Order doesn't matter: Lightroom may return the same selection reordered.
+local function sameTargets(a, b)
+	if #a ~= #b then return false end
+	local photoCount = {}
+	for _, entry in ipairs(b) do
+		photoCount[entry.path] = #entry.photos
+	end
+	for _, entry in ipairs(a) do
+		if photoCount[entry.path] ~= #entry.photos then return false end
+	end
+	return true
+end
+
 LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	LrDialogs.attachErrorDialogToFunctionContext(context)
 	-- This file runs afresh for each menu click, but required modules are shared, so the flag
 	-- lives in Exec. A second Classify Photos is turned away instead of opening a second review.
 	if Exec.running then
-		LrDialogs.message('Classify Photos', 'Classify Photos is already running. Finish its review first.', 'info')
+		LrDialogs.message('Classify Photos', BUSY[Exec.running], 'info')
 		return
 	end
-	Exec.running = true
-	context:addCleanupHandler(function() Exec.running = false end)
+	Exec.running = 'options'
+	context:addCleanupHandler(function() Exec.running = nil end)
 
 	local entries, videos = collectTargets(LrApplication.activeCatalog())
 	local paths, duplicates = {}, 0
@@ -242,8 +264,17 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	end
 	local options = Options.ask(context, #paths)
 	if not options then return end
+	-- The options window doesn't block Lightroom, so the selection may have changed meanwhile.
+	local now = collectTargets(LrApplication.activeCatalog())
+	if not sameTargets(entries, now) then
+		local answer = LrDialogs.confirm('The selection changed while the options window was open.',
+			string.format('Classify the %d photo(s) the options window showed? To classify the new selection, cancel and run Classify Photos again.', #paths),
+			'Classify', 'Cancel')
+		if answer ~= 'ok' then return end
+	end
 	local labelArgs = labelArguments(context, options)
 	-- Lightroom's thumbnails are requested while classifying, so most are ready for the review.
+	Exec.running = 'classifying'
 	local thumbs = Thumbs.start(context, entries)
 
 	local results, backend, cancelled = classifyAll(context, paths, labelArgs, thumbs)
@@ -266,6 +297,7 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 		if cancelled then
 			summary = summary .. string.format('\nCancelled after %d of %d photos.', #results, #paths)
 		end
+		Exec.running = 'report'
 		Review.showReport(context, summary, lines)
 		return
 	end
@@ -277,6 +309,7 @@ LrFunctionContext.postAsyncTaskWithContext('Klassifier', function(context)
 	end
 	-- Reopens the review (choices kept) if the catalog is busy when writing.
 	local catalog = LrApplication.activeCatalog()
+	Exec.running = 'review'
 	while true do
 		local result = Review.show(context, items, notes)
 		if result ~= 'ok' then return end
