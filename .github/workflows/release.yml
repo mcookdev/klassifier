@@ -1,0 +1,123 @@
+# Promotes a manual Build run to a GitHub Release: the zips that run uploaded, the ones you
+# downloaded and tried, not a new build. Run it from Actions > Release > Run workflow with the
+# Build run's ID, the number at the end of its URL. It tags the commit that run built as
+# v<version> and attaches both zips, with install notes (tools/release-notes.md) and the
+# commits since the last release. A build can be promoted until its artifacts expire (30 days,
+# build.yml), and each version only once.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: ID of a manual Build run (the number at the end of its URL)
+        required: true
+        type: string
+      draft:
+        description: Create the release as a draft, to publish by hand
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # the tag and the release
+  actions: read # the Build run and its artifacts
+
+# One release at a time, never cancelled halfway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ inputs.run-id }}
+    steps:
+      # The notes template, from the branch Release runs on.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: tools/release-notes.md
+          sparse-checkout-cone-mode: false
+      # Only a successful manual Build run has the zips.
+      - name: Check the Build run
+        id: run
+        run: |
+          case $RUN_ID in
+            '' | *[!0-9]*) echo "::error::run-id must be a Build run's number, not '$RUN_ID'"; exit 1 ;;
+          esac
+          info=$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID" --jq '"\(.path) \(.event) \(.conclusion) \(.head_sha)"')
+          read -r path event conclusion sha <<EOF
+          $info
+          EOF
+          case $path in
+            .github/workflows/build.yml*) ;;
+            *) echo "::error::run $RUN_ID is not a Build run ($path)"; exit 1 ;;
+          esac
+          if [ "$event" != workflow_dispatch ]; then
+            echo "::error::run $RUN_ID was started by $event; only a manual Build run (Run workflow) uploads the zips"
+            exit 1
+          fi
+          if [ "$conclusion" != success ]; then
+            echo "::error::run $RUN_ID did not succeed ($conclusion)"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      # Saved as they are: unpacked, the zips would be the plugin's folders.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ github.token }}
+          pattern: Klassifier-*.zip
+          merge-multiple: true
+          skip-decompress: true
+          path: zips
+      # The version from the zips' names (tools/version-name.sh): Klassifier-3.2.2-build66-macos.zip.
+      - name: Check the zips
+        id: zips
+        run: |
+          ls -l zips
+          set -- zips/Klassifier-*-macos.zip
+          if [ $# -ne 1 ] || [ ! -f "$1" ]; then
+            echo "::error::run $RUN_ID has no macOS zip (expired after 30 days?)"
+            exit 1
+          fi
+          name=${1#zips/Klassifier-}
+          name=${name%-macos.zip}
+          version=${name%-build*}
+          build=${name##*-build}
+          if [ ! -f "zips/Klassifier-$name-windows.zip" ]; then
+            echo "::error::run $RUN_ID has no Windows zip for $name"
+            exit 1
+          fi
+          if [ "$(ls zips | wc -l)" -ne 2 ]; then
+            echo "::error::expected two zips in run $RUN_ID"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+      - name: Create the release
+        env:
+          SHA: ${{ steps.run.outputs.sha }}
+          VERSION: ${{ steps.zips.outputs.version }}
+          BUILD: ${{ steps.zips.outputs.build }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          tag=v$VERSION
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" --silent 2>/dev/null; then
+            echo "::error::tag $tag already exists; bump the version and build again"
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::a release for $tag already exists (a draft?)"
+            exit 1
+          fi
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@BUILD@/$BUILD/g" -e "s/@SHA@/$SHA/g" \
+            -e "s|@RUN_URL@|$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$RUN_ID|g" \
+            tools/release-notes.md > notes.md
+          draft=
+          if [ "$DRAFT" = true ]; then draft=--draft; fi
+          gh release create "$tag" zips/*.zip $draft --target "$SHA" \
+            --title "Klassifier $VERSION (build $BUILD)" --notes-file notes.md --generate-notes

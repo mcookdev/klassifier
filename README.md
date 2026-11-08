@@ -135,6 +135,10 @@ instead of showing it, and `DEMO_PHOTOS=<folder>` uses other photos.
 
 ## Installation
 
+To install a released build, download the zip for your platform from
+[Releases](https://github.com/mcookdev/klassifier/releases) and follow the
+release's notes. To install your own build:
+
 On Windows:
 
 1. Run `make deploy`.
@@ -458,6 +462,27 @@ manifest line is tab-separated:
 
 where `source` is the value the app reports (`file`, `preview`, `full` or
 `thumbnail`). Lines starting with `#` are comments.
+
+## CI and releases
+
+Every push to main and every pull request runs `make test`, `make clippy` and
+`make build` for both platforms on GitHub Actions (`.github/workflows/build.yml`):
+macOS on a macOS runner, Windows cross-compiled on Linux, as in WSL. The builds
+aren't kept.
+
+To get a build to try, start the workflow by hand: **Actions > Build > Run
+workflow**. That run also runs `make dist` and keeps both plugins as zips on the
+run's page under **Artifacts** for 30 days, named after the version
+(`Klassifier-3.2.2-build66-macos.zip`). You need to be signed in to GitHub to
+download them.
+
+To release a build you've tried, promote it: **Actions > Release > Run
+workflow**, with the Build run's ID (the number at the end of its URL). It
+attaches that run's zips, not a new build, to a GitHub Release, and tags the
+commit it built `v<version>`. Tick **draft** to review the release before
+publishing it. Each version can be released once, so bump it before the next
+build. The release notes start with the install steps in
+`tools/release-notes.md`.
 
 ## The app icon
 
